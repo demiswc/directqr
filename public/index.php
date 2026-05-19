@@ -27,7 +27,7 @@ $DEBUG             = ($_ENV['DIRECTQR_DEBUG'] ?? '0') === '1';
 $RATE_LIMIT        = (int)($_ENV['DIRECTQR_RATE_LIMIT'] ?? 10);
 $MAX_UPLOAD_BYTES  = (int)($_ENV['DIRECTQR_MAX_UPLOAD_BYTES'] ?? 5_242_880);
 $MAX_DIMENSION     = (int)($_ENV['DIRECTQR_MAX_DIMENSION'] ?? 4000);
-$RATE_LIMIT_DIR    = sys_get_temp_dir() . '/directqr-ratelimit';
+$RATE_LIMIT_DIR    = __DIR__ . '/.ratelimit';
 
 if ($DEBUG) {
     ini_set('display_errors', '1');
