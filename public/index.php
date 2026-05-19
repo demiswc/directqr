@@ -613,19 +613,17 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     padding: 1.5rem;
   }
 
-  /* Promise & Details */
   .info-sections { display: grid; gap: 1rem; margin-bottom: 1.5rem; }
-  .promise, details { 
+  details { 
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 1rem 1.25rem; font-size: .95rem;
     backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
   }
-  .promise strong { font-size: 1rem; font-weight: 600; }
-  .promise ul { margin: .5rem 0 0; padding-left: 1.2rem; }
-  .promise li { margin: .3rem 0; }
-  .promise li::marker { content: "✓ "; color: var(--pink); font-weight: bold; }
   details summary { font-weight: 600; cursor: pointer; padding: .25rem 0; outline-offset: 3px; }
   details[open] summary { margin-bottom: .5rem; color: var(--pink); }
+  details ul { margin: .5rem 0 0; padding-left: 1.2rem; }
+  details li { margin: .3rem 0; }
+  details li::marker { content: "✓ "; color: var(--pink); font-weight: bold; }
   details ol { padding-left: 1.2rem; margin: .5rem 0; }
   details li { margin: .35rem 0; }
 
@@ -659,6 +657,8 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     border-radius: 8px; padding: 2px; cursor: pointer; flex-shrink: 0;
     background: var(--card-solid);
   }
+  
+  input[type=range] { width: 100%; touch-action: pan-y; accent-color: var(--pink); }
   
   .checkbox-row {
     display: flex;
@@ -785,8 +785,8 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
   
   <div class="left-col">
     <div class="info-sections">
-      <section class="promise" aria-label="What makes this tool different">
-        <strong>What makes <?= APP_NAME ?> different:</strong>
+      <details>
+        <summary>What makes <?= APP_NAME ?> different?</summary>
         <ul>
           <li>Your URL is encoded <em>directly</em> in the QR — no redirect service in the middle</li>
           <li>No tracking, no analytics, no cookies</li>
@@ -794,7 +794,7 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
           <li>Works forever as long as your website does</li>
           <li>Nothing is saved on our server — your data is processed in memory and discarded</li>
         </ul>
-      </section>
+      </details>
 
       <details>
         <summary>How to use it (30 seconds)</summary>
@@ -834,17 +834,31 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
 
       <div id="pane-vcard" class="tab-pane">
         <div class="row">
-          <label for="vc-fname">First <input type="text" id="vc-fname" name="vc_fname"></label>
-          <label for="vc-lname">Last <input type="text" id="vc-lname" name="vc_lname"></label>
+          <label for="vc-fname">First Name <input type="text" id="vc-fname" name="vc_fname"></label>
+          <label for="vc-lname">Last Name <input type="text" id="vc-lname" name="vc_lname"></label>
         </div>
+        <div class="row">
+          <label for="vc-org">Company <input type="text" id="vc-org" name="vc_org"></label>
+          <label for="vc-title">Job Title <input type="text" id="vc-title" name="vc_title"></label>
+        </div>
+        <div class="row">
+          <label for="vc-tel">Phone <input type="tel" id="vc-tel" name="vc_tel"></label>
+          <label for="vc-email">Email <input type="email" id="vc-email" name="vc_email"></label>
+        </div>
+        <label for="vc-url">Website <input type="url" id="vc-url" name="vc_url" placeholder="https://"></label>
       </div>
 
       <div id="pane-text" class="tab-pane">
-        <label for="text-content">Content <textarea id="text-content" name="text_content"></textarea></label>
+        <label for="text-content">
+          Message or Serial Number
+          <textarea id="text-content" name="text_content" placeholder="Enter any text here..."></textarea>
+        </label>
       </div>
 
       <div id="pane-email" class="tab-pane">
-        <label for="email-to">To <input type="email" id="email-to" name="email_to"></label>
+        <label for="email-to">Send To <input type="email" id="email-to" name="email_to" placeholder="hello@example.com"></label>
+        <label for="email-sub">Subject <input type="text" id="email-sub" name="email_sub"></label>
+        <label for="email-body">Body <textarea id="email-body" name="email_body"></textarea></label>
       </div>
       
       <label for="mode">Style
@@ -904,7 +918,22 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
 
       <fieldset id="designer-options">
         <legend>Designer</legend>
-        <label for="photo-designer">Logo <input type="file" name="photo_designer" id="photo-designer"></label>
+
+        <label for="centershape">Centre shape
+          <select name="centershape" id="centershape" onchange="document.getElementById('centersize-label').style.display = this.value === 'none' ? 'none' : 'grid'">
+            <option value="circle" selected>Circle (with ring)</option>
+            <option value="square">Rounded square</option>
+            <option value="none">None — logo only, no shape</option>
+          </select>
+        </label>
+
+        <label for="centersize" id="centersize-label">
+          Centre size: <span id="centersize-value">14</span>%
+          <input type="range" name="centersize" id="centersize" min="8" max="22" value="14"
+                 oninput="document.getElementById('centersize-value').textContent = this.value">
+        </label>
+
+        <label for="photo-designer" style="margin-top:0.5rem">Logo <input type="file" name="photo_designer" id="photo-designer"></label>
       </fieldset>
 
       <fieldset id="halftone-options" class="hidden">
@@ -912,10 +941,10 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
         <label for="photo-halftone">Photo <input type="file" name="photo_halftone" id="photo-halftone"></label>
       </fieldset>
 
-      <fieldset class="advanced-settings">
-        <legend>Advanced</legend>
-        <div class="row">
-          <label for="size">Size (px) <input type="number" name="size" id="size" value="1200"></label>
+      <details style="border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem;">
+        <summary style="font-weight: 600; cursor: pointer;">Advanced Settings</summary>
+        <div class="row" style="margin-top: 1rem;">
+          <label for="size">Size (px) <input type="number" name="size" id="size" value="1200" step="100"></label>
           <label for="format">Format
             <select name="format" id="format">
               <option value="png">PNG (Raster)</option>
@@ -923,9 +952,9 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
             </select>
           </label>
         </div>
-      </fieldset>
+      </details>
 
-      <button type="submit" class="go" id="generate-btn">
+      <button type="submit" class="go" id="generate-btn" style="margin-top:0.5rem">
         <span id="btn-label">Generate QR code →</span>
       </button>
     </form>
@@ -936,7 +965,7 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
       <div class="preview glass-panel" id="preview" aria-live="polite">
         <div id="preview-placeholder" class="preview-placeholder">
           <div style="font-size:3rem;margin-bottom:.5rem;opacity:0.5">🪄</div>
-          Fill out the form and click Generate.
+          Live Preview is active.<br><span style="font-size:0.9rem">Start typing or tweaking settings!</span>
         </div>
         <div class="preview-status hidden" id="preview-status"></div>
         <img id="qr-img" alt="Generated QR code" style="display:none">
@@ -981,6 +1010,7 @@ tabBtns.forEach(btn => {
     btn.classList.add('active');
     document.getElementById(btn.getAttribute('data-target')).classList.add('active');
     typeInput.value = btn.getAttribute('data-target').replace('pane-', '');
+    generateQR();
   });
 });
 
@@ -1009,6 +1039,7 @@ document.querySelectorAll('.preset-btn').forEach(btn => {
       else if (btn.dataset.fg === '#1B4332') fg2.value = '#90d5ec';
       fg2Text.value = fg2.value.toUpperCase();
     }
+    generateQR();
   });
 });
 
@@ -1042,9 +1073,8 @@ mode.addEventListener('change', () => {
 
 let currentBlobUrl = null;
 
-document.getElementById('qr-form').addEventListener('submit', async function(e) {
-  e.preventDefault();
-
+async function generateQR() {
+  const form = document.getElementById('qr-form');
   const btn       = document.getElementById('generate-btn');
   const btnLabel  = document.getElementById('btn-label');
   const status    = document.getElementById('preview-status');
@@ -1070,11 +1100,6 @@ document.getElementById('qr-form').addEventListener('submit', async function(e) 
   status.innerHTML = '<span class="spinner" style="border-color:var(--border);border-top-color:var(--pink)"></span> Generating...';
   status.classList.remove('hidden');
 
-  // Smooth scroll to preview on mobile
-  if (window.innerWidth <= 850) {
-    setTimeout(() => document.querySelector('.right-col').scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
-  }
-
   // Revoke previous blob
   if (currentBlobUrl) {
     URL.revokeObjectURL(currentBlobUrl);
@@ -1082,7 +1107,7 @@ document.getElementById('qr-form').addEventListener('submit', async function(e) 
   }
 
   try {
-    const formData = new FormData(this);
+    const formData = new FormData(form);
     const resp = await fetch(window.location.href, {
       method: 'POST',
       body: formData
@@ -1112,7 +1137,9 @@ document.getElementById('qr-form').addEventListener('submit', async function(e) 
 
     // Wire up download button
     dlBtn.href = currentBlobUrl;
-    dlBtn.download = 'qrcode.png';
+    let outFormat = document.getElementById('format').value;
+    if (document.getElementById('mode').value !== 'plain') outFormat = 'png';
+    dlBtn.download = 'qrcode.' + outFormat;
     actions.style.display = 'flex';
 
     // Show share button if Web Share API is available
@@ -1120,7 +1147,7 @@ document.getElementById('qr-form').addEventListener('submit', async function(e) 
       shareBtn.style.display = 'inline-flex';
       shareBtn.onclick = async () => {
         try {
-          const file = new File([blob], 'qrcode.png', { type: 'image/png' });
+          const file = new File([blob], 'qrcode.' + outFormat, { type: contentType });
           if (navigator.canShare({ files: [file] })) {
             await navigator.share({ files: [file], title: 'QR Code', text: 'My QR code from DirectQR' });
           }
@@ -1133,13 +1160,37 @@ document.getElementById('qr-form').addEventListener('submit', async function(e) 
     }
 
   } catch (err) {
-    status.innerHTML = '<span style="color:#e74c3c;font-size:1.3rem">✕</span> Generation failed';
+    status.innerHTML = '<span style="color:#e74c3c;font-size:1.3rem">✗ </span> Generation failed';
     errorEl.textContent = err.message;
     errorEl.classList.remove('hidden');
   } finally {
     btn.disabled = false;
     btnLabel.textContent = 'Generate QR code →';
   }
+}
+
+let timeoutId;
+function debounceGenerate() {
+  clearTimeout(timeoutId);
+  timeoutId = setTimeout(() => generateQR(), 800);
+}
+
+const form = document.getElementById('qr-form');
+form.addEventListener('submit', function(e) {
+  e.preventDefault();
+  generateQR();
+  // Smooth scroll to preview on mobile only on manual submit
+  if (window.innerWidth <= 850) {
+    setTimeout(() => document.querySelector('.right-col').scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+  }
+});
+
+// Attach Live Preview events
+form.querySelectorAll('input[type="text"], input[type="url"], input[type="email"], input[type="number"], textarea').forEach(el => {
+  el.addEventListener('input', debounceGenerate);
+});
+form.querySelectorAll('input[type="color"], input[type="checkbox"], input[type="file"], select, input[type="range"]').forEach(el => {
+  el.addEventListener('change', generateQR);
 });
 </script>
 </body>
