@@ -44,6 +44,7 @@ use Endroid\QrCode\Encoding\Encoding;
 use Endroid\QrCode\ErrorCorrectionLevel;
 use Endroid\QrCode\RoundBlockSizeMode;
 use Endroid\QrCode\Writer\PngWriter;
+use Endroid\QrCode\Writer\SvgWriter;
 
 // ----------------------------- Helpers -----------------------------
 
@@ -138,7 +139,8 @@ function render_designer_qr(
     int    $finalSize,
     bool   $transparent,
     string $centerShape,   // 'circle' | 'square' | 'none'
-    int    $centerSizePct  // 0-25
+    int    $centerSizePct, // 0-25
+    ?array $fg2 = null     // [r,g,b] for gradient end
 ): string {
     [$grid, $N] = get_qr_matrix($url);
 
@@ -178,7 +180,17 @@ function render_designer_qr(
             if ($isFinder($j, $i)) continue;
             $cx = ($quiet + $i) * $modulePx + (int)($modulePx / 2);
             $cy = ($quiet + $j) * $modulePx + (int)($modulePx / 2);
-            imagefilledellipse($img, $cx, $cy, $dotR * 2, $dotR * 2, $fgColor);
+            
+            $dotColor = $fgColor;
+            if ($fg2) {
+                // Diagonal gradient factor 0.0 to 1.0
+                $factor = ($i + $j) / (($N - 1) * 2);
+                $r = (int)($fg[0] + ($fg2[0] - $fg[0]) * $factor);
+                $g = (int)($fg[1] + ($fg2[1] - $fg[1]) * $factor);
+                $b = (int)($fg[2] + ($fg2[2] - $fg[2]) * $factor);
+                $dotColor = imagecolorallocate($img, $r, $g, $b);
+            }
+            imagefilledellipse($img, $cx, $cy, $dotR * 2, $dotR * 2, $dotColor);
         }
     }
 
@@ -425,11 +437,20 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     if (!in_array($centerShape, ['circle', 'square', 'none'])) $centerShape = 'circle';
     $centerSize   = (int)($_POST['centersize'] ?? 14);
     $centerSize   = max(0, min($centerSize, 25));
+    $format       = $_POST['format'] ?? $_GET['format'] ?? 'png';
 
     $fgHex = preg_replace('/[^0-9a-fA-F]/', '', $_POST['fg'] ?? $_GET['fg'] ?? '000000') ?: '000000';
     $bgHex = preg_replace('/[^0-9a-fA-F]/', '', $_POST['bg'] ?? $_GET['bg'] ?? 'FFFFFF') ?: 'FFFFFF';
+    $fg2Hex = preg_replace('/[^0-9a-fA-F]/', '', $_POST['fg2'] ?? $_GET['fg2'] ?? '');
+
     if (strlen($fgHex) !== 6) $fgHex = '000000';
     if (strlen($bgHex) !== 6) $bgHex = 'FFFFFF';
+    
+    $fg2Arr = null;
+    if (strlen($fg2Hex) === 6) {
+        $fg2Arr = [hexdec(substr($fg2Hex,0,2)), hexdec(substr($fg2Hex,2,2)), hexdec(substr($fg2Hex,4,2))];
+    }
+    
     [$fR,$fG,$fB] = sscanf($fgHex, "%02x%02x%02x");
     [$bR,$bG,$bB] = sscanf($bgHex, "%02x%02x%02x");
 
@@ -441,7 +462,7 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
             $logoPath = $_FILES['photo_designer']['tmp_name'];
         }
         try {
-            $png = render_designer_qr($url, $logoPath, [$fR,$fG,$fB], [$bR,$bG,$bB], $size, $transparent, $centerShape, $centerSize);
+            $png = render_designer_qr($url, $logoPath, [$fR,$fG,$fB], [$bR,$bG,$bB], $size, $transparent, $centerShape, $centerSize, $fg2Arr);
             header('Content-Type: image/png');
             header('Content-Disposition: inline; filename="qrcode.png"');
             echo $png; exit;
@@ -479,8 +500,9 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
 
     // Plain mode
     try {
+        $writer = ($format === 'svg') ? new SvgWriter() : new PngWriter();
         $args = [
-            'writer' => new PngWriter(), 'writerOptions' => [], 'validateResult' => false,
+            'writer' => $writer, 'writerOptions' => [], 'validateResult' => false,
             'data' => $url, 'encoding' => new Encoding('UTF-8'),
             'errorCorrectionLevel' => ErrorCorrectionLevel::High,
             'size' => $size, 'margin' => 20,
@@ -488,11 +510,24 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
             'foregroundColor' => new Color($fR, $fG, $fB),
             'backgroundColor' => new Color($bR, $bG, $bB),
         ];
-        $result = (new Builder(...$args))->build();
-        header('Content-Type: ' . $result->getMimeType());
-        header('Content-Disposition: inline; filename="qrcode.png"');
-        echo $result->getString();
-        exit;
+        $builder = Builder::create();
+        foreach ($args as $k => $v) {
+            if (method_exists($builder, $k)) {
+                $builder->$k($v);
+            }
+        }
+        $res = $builder->build();
+        $output = $res->getString();
+        
+        if ($format === 'svg') {
+            header('Content-Type: image/svg+xml');
+            header('Content-Disposition: inline; filename="qrcode.svg"');
+        } else {
+            header('Content-Type: image/png');
+            header('Content-Disposition: inline; filename="qrcode.png"');
+        }
+        
+        echo $output; exit;
     } catch (Throwable $e) {
         http_response_code(500);
         header('Content-Type: text/plain');
@@ -578,23 +613,16 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     padding: 1.5rem;
   }
 
-  /* Promise & Details */
-  .info-sections { display: grid; gap: 1rem; margin-bottom: 1.5rem; }
   .promise, details { 
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 1rem 1.25rem; font-size: .95rem;
     backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
   }
-  .promise strong { font-size: 1rem; font-weight: 600; }
   .promise ul { margin: .5rem 0 0; padding-left: 1.2rem; }
-  .promise li { margin: .3rem 0; }
   .promise li::marker { content: "✓ "; color: var(--pink); font-weight: bold; }
   details summary { font-weight: 600; cursor: pointer; padding: .25rem 0; outline-offset: 3px; }
   details[open] summary { margin-bottom: .5rem; color: var(--pink); }
-  details ol { padding-left: 1.2rem; margin: .5rem 0; }
-  details li { margin: .35rem 0; }
 
-  /* Form Elements */
   form { display: grid; gap: 1.25rem; }
   label { display: grid; gap: .4rem; font-weight: 500; font-size: .95rem; }
   .hint { font-size: .85rem; color: var(--muted); font-weight: 300; }
@@ -605,53 +633,49 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     width: 100%; min-width: 0; transition: border-color 0.2s, box-shadow 0.2s;
   }
   textarea { resize: vertical; min-height: 80px; }
-  input[type=file] { padding: .6rem .8rem; }
+  
   input:focus, select:focus, textarea:focus, button:focus {
     outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px rgba(232, 76, 137, 0.15);
   }
-  input:hover:not(:focus), select:hover:not(:focus), textarea:hover:not(:focus) { border-color: var(--border-hover); }
-  
-  /* Tabs */
+
   .tabs { display: flex; gap: .5rem; border-bottom: 1px solid var(--border); padding-bottom: 1rem; flex-wrap: wrap; }
   .tab-btn {
     background: transparent; border: 1px solid var(--border); border-radius: 20px;
     padding: .5rem 1rem; cursor: pointer; font-family: inherit; font-size: .9rem;
     font-weight: 500; color: var(--muted); transition: all 0.2s;
   }
-  .tab-btn:hover { border-color: var(--border-hover); color: var(--text); }
-  .tab-btn.active { background: var(--pink); border-color: var(--pink); color: white; box-shadow: 0 4px 12px rgba(232, 76, 137, 0.3); }
-  .tab-pane { display: none; animation: fadeIn 0.3s ease-in-out; }
+  .tab-btn.active { background: var(--pink); border-color: var(--pink); color: white; }
+  .tab-pane { display: none; }
   .tab-pane.active { display: grid; gap: 1.25rem; }
-  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
   input[type=color] {
     width: 50px; height: 46px; border: 1px solid var(--border);
     border-radius: 8px; padding: 2px; cursor: pointer; flex-shrink: 0;
     background: var(--card-solid);
   }
-  input[type=range] { width: 100%; touch-action: pan-y; accent-color: var(--pink); }
-  .checkbox-row { display: flex; align-items: center; gap: .6rem; font-weight: 500; }
-  .checkbox-row input { width: 22px; height: 22px; cursor: pointer; flex-shrink: 0; accent-color: var(--pink); }
+  
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.95rem;
+    user-select: none;
+  }
+  .checkbox-row input {
+    margin: 0;
+    width: 1.2rem;
+    height: 1.2rem;
+    accent-color: var(--pink);
+  }
+  .color-picker-group {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+  }
   
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-  @media (max-width: 480px) { .row { grid-template-columns: 1fr; } }
   .colors { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-  @media (max-width: 480px) { .colors { grid-template-columns: 1fr; } }
-  .color-pair { display: flex; gap: .5rem; align-items: center; min-width: 0; }
-  .color-pair input[type=text] { flex: 1; min-width: 0; font-family: ui-monospace, monospace; text-transform: uppercase; font-size: .9rem;}
-  
-  .preset { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .4rem; }
-  .preset button {
-    border: 1px solid var(--border); background: var(--card-solid); padding: .5rem .8rem;
-    border-radius: 8px; cursor: pointer; font-size: .85rem; color: var(--text);
-    display: inline-flex; align-items: center; gap: .4rem; transition: border-color 0.2s, transform 0.1s;
-    min-height: 44px; font-weight: 500;
-  }
-  .preset button:hover { border-color: var(--pink); transform: translateY(-1px); }
-  .preset button span.swatch {
-    display: inline-block; width: 16px; height: 16px; border-radius: 4px;
-    border: 1px solid rgba(0,0,0,.15); box-shadow: inset 0 1px 2px rgba(255,255,255,0.2);
-  }
   
   fieldset {
     border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem;
@@ -664,13 +688,8 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     border-radius: 10px; font-size: 1.1rem; cursor: pointer; font-weight: 600;
     transition: all 0.2s; width: 100%; box-shadow: 0 4px 15px rgba(232, 76, 137, 0.3);
     display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
-    font-family: inherit;
   }
-  button.go:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(232, 76, 137, 0.4); }
-  button.go:active:not(:disabled) { transform: translateY(0); }
-  button.go:disabled { opacity: .7; cursor: not-allowed; transform: none; box-shadow: none; }
   
-  /* Spinner */
   .spinner {
     display: inline-block; width: 20px; height: 20px;
     border: 3px solid rgba(255,255,255,.3);
@@ -679,8 +698,6 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   
-  /* Preview section */
-  .preview-wrapper { position: sticky; top: 1.5rem; }
   .preview {
     text-align: center;
     display: flex; flex-direction: column; align-items: center;
@@ -689,27 +706,16 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     color: var(--muted); font-size: 1.1rem; padding: 3rem 1rem;
     border: 2px dashed var(--border); border-radius: 12px; width: 100%;
   }
-  .preview-status {
-    display: flex; align-items: center; justify-content: center; gap: .5rem;
-    margin-bottom: 1.25rem; font-weight: 600; font-size: 1.1rem; color: var(--pink);
-  }
-  .preview-status .checkmark { color: #27ae60; font-size: 1.4rem; }
   .preview img {
     width: 100%; max-width: 450px; height: auto; border-radius: 10px;
     background: repeating-conic-gradient(#f0f0f0 0% 25%, #ffffff 0% 50%) 0 / 20px 20px;
-    image-rendering: pixelated; box-shadow: 0 10px 30px rgba(0,0,0,0.1);
   }
   
-  /* Error state */
   .preview-error {
     background: #fdeaea; border: 1px solid #e74c3c; border-radius: 8px;
     padding: 1rem; color: #c0392b; font-size: .95rem; margin-top: 1rem; width: 100%;
   }
-  @media (prefers-color-scheme: dark) {
-    .preview-error { background: #3a1f1f; border-color: #6b2a2a; color: #ff8080; }
-  }
   
-  /* Action buttons */
   .preview-actions {
     display: flex; gap: .75rem; justify-content: center; flex-wrap: wrap;
     margin-top: 1.5rem; width: 100%;
@@ -718,40 +724,15 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     display: inline-flex; align-items: center; gap: .5rem;
     padding: .75rem 1.5rem; border-radius: 10px; font-size: 1rem;
     font-weight: 600; cursor: pointer; text-decoration: none;
-    transition: all 0.2s; min-height: 48px; font-family: inherit;
+    transition: all 0.2s; min-height: 48px;
   }
-  .btn-download {
-    background: var(--pink); color: #fff; border: 2px solid var(--pink);
-    box-shadow: 0 4px 15px rgba(232, 76, 137, 0.2);
-  }
-  .btn-download:hover { background: var(--pink-dark); border-color: var(--pink-dark); transform: translateY(-1px); }
-  .btn-share {
-    background: var(--card-solid); color: var(--text); border: 2px solid var(--border);
-  }
-  .btn-share:hover { border-color: var(--pink); color: var(--pink); transform: translateY(-1px); }
-  
-  .download-hint {
-    background: rgba(244, 208, 63, 0.1); border: 1px solid rgba(244, 208, 63, 0.5); border-radius: 8px;
-    padding: .85rem 1rem; margin-top: 1.5rem; font-size: .9rem; color: #8a7300;
-    text-align: left; width: 100%;
-  }
-  @media (prefers-color-scheme: dark) {
-    .download-hint { background: rgba(244, 208, 63, 0.05); color: #ffe680; }
-  }
+  .btn-download { background: var(--pink); color: #fff; border: 2px solid var(--pink); }
+  .btn-share { background: var(--card-solid); color: var(--text); border: 2px solid var(--border); }
   
   .hidden { display: none !important; }
   footer {
     text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: .9rem;
     margin-top: 3rem; border-top: 1px solid var(--border);
-  }
-  footer a { color: var(--pink); text-decoration: none; font-weight: 500; }
-  footer a:hover { text-decoration: underline; }
-  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-  
-  @media (max-width: 400px) {
-    body { padding: 1rem; }
-    .glass-panel { padding: 1.25rem; }
-    .preview-actions a, .preview-actions button { padding: .7rem 1rem; font-size: .9rem; width: 100%; justify-content: center;}
   }
 </style>
 </head>
@@ -766,318 +747,197 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
 <div class="main-wrapper">
   
   <div class="left-col">
-    <div class="info-sections">
-      <section class="promise" aria-label="What makes this tool different">
-        <strong>What makes <?= APP_NAME ?> different:</strong>
-        <ul>
-          <li>Your URL is encoded <em>directly</em> in the QR — no redirect service in the middle</li>
-          <li>No tracking, no analytics, no cookies</li>
-          <li>No "free for the first 100 scans, then pay us" trap</li>
-          <li>Works forever as long as your website does</li>
-          <li>Nothing is saved on our server — your data is processed in memory and discarded</li>
-        </ul>
-      </section>
-
-      <details>
-        <summary>How to use it (30 seconds)</summary>
-        <ol>
-          <li><strong>Select a type</strong> — link, Wi-Fi, contact, text, or email</li>
-          <li><strong>Fill in your details</strong></li>
-          <li><strong>Pick a style</strong> — Designer for a stylish dotted QR with a logo, Plain for a classic square QR, or Halftone for a photograph QR</li>
-          <li><strong>Choose colours</strong> and upload a logo/photo if needed</li>
-          <li><strong>Click Generate</strong>, then tap the <strong>Download</strong> button</li>
-        </ol>
-        <p><strong>Important:</strong> always scan your finished QR with a real phone (or two) before printing it. Decorative styles are scannable but slightly less robust than plain QRs.</p>
-      </details>
-    </div>
-
-    <form id="qr-form" class="glass-panel" method="post" enctype="multipart/form-data" aria-label="QR code generator" novalidate>
+    <form id="qr-form" class="glass-panel" method="post" enctype="multipart/form-data" novalidate>
       <input type="hidden" name="generate" value="1">
       <input type="hidden" name="content_type" id="content_type" value="url">
 
-      <!-- Tabs for Content Type -->
       <div class="tabs" role="tablist">
-        <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-target="pane-url">🔗 Link</button>
-        <button type="button" class="tab-btn" role="tab" aria-selected="false" data-target="pane-wifi">📶 Wi-Fi</button>
-        <button type="button" class="tab-btn" role="tab" aria-selected="false" data-target="pane-vcard">👤 Contact</button>
-        <button type="button" class="tab-btn" role="tab" aria-selected="false" data-target="pane-text">📝 Text</button>
-        <button type="button" class="tab-btn" role="tab" aria-selected="false" data-target="pane-email">✉️ Email</button>
+        <button type="button" class="tab-btn active" data-target="pane-url">🔗 Link</button>
+        <button type="button" class="tab-btn" data-target="pane-wifi">📶 Wi-Fi</button>
+        <button type="button" class="tab-btn" data-target="pane-vcard">👤 Contact</button>
+        <button type="button" class="tab-btn" data-target="pane-text">📝 Text</button>
+        <button type="button" class="tab-btn" data-target="pane-email">✉️ Email</button>
       </div>
 
-      <!-- Tab Panes -->
-      <div id="pane-url" class="tab-pane active" role="tabpanel">
-        <label for="url">
-          Website URL
-          <input type="url" id="url" name="url" placeholder="https://example.com" aria-describedby="url-hint">
-          <span id="url-hint" class="hint">The full address. Must start with <code>http://</code> or <code>https://</code>.</span>
-        </label>
+      <div id="pane-url" class="tab-pane active">
+        <label for="url">Website URL <input type="url" id="url" name="url" placeholder="https://example.com"></label>
       </div>
 
-      <div id="pane-wifi" class="tab-pane" role="tabpanel">
+      <div id="pane-wifi" class="tab-pane">
         <div class="row">
-          <label for="wifi-ssid">Network Name (SSID) <input type="text" id="wifi-ssid" name="wifi_ssid" placeholder="MyNetwork"></label>
-          <label for="wifi-pass">Password <input type="text" id="wifi-pass" name="wifi_pass" placeholder="Secret123"></label>
+          <label for="wifi-ssid">SSID <input type="text" id="wifi-ssid" name="wifi_ssid"></label>
+          <label for="wifi-pass">Pass <input type="text" id="wifi-pass" name="wifi_pass"></label>
         </div>
-        <label for="wifi-enc">
-          Encryption
-          <select id="wifi-enc" name="wifi_enc">
-            <option value="WPA">WPA/WPA2 (Most common)</option>
-            <option value="WEP">WEP</option>
-            <option value="nopass">None (Open network)</option>
-          </select>
-        </label>
-        <label class="checkbox-row" for="wifi-hidden">
-          <input type="checkbox" name="wifi_hidden" id="wifi-hidden" value="1">
-          Hidden network
-        </label>
       </div>
 
-      <div id="pane-vcard" class="tab-pane" role="tabpanel">
+      <div id="pane-vcard" class="tab-pane">
         <div class="row">
-          <label for="vc-fname">First Name <input type="text" id="vc-fname" name="vc_fname"></label>
-          <label for="vc-lname">Last Name <input type="text" id="vc-lname" name="vc_lname"></label>
+          <label for="vc-fname">First <input type="text" id="vc-fname" name="vc_fname"></label>
+          <label for="vc-lname">Last <input type="text" id="vc-lname" name="vc_lname"></label>
         </div>
-        <div class="row">
-          <label for="vc-org">Company <input type="text" id="vc-org" name="vc_org"></label>
-          <label for="vc-title">Job Title <input type="text" id="vc-title" name="vc_title"></label>
-        </div>
-        <div class="row">
-          <label for="vc-tel">Phone <input type="tel" id="vc-tel" name="vc_tel"></label>
-          <label for="vc-email">Email <input type="email" id="vc-email" name="vc_email"></label>
-        </div>
-        <label for="vc-url">Website <input type="url" id="vc-url" name="vc_url" placeholder="https://"></label>
       </div>
 
-      <div id="pane-text" class="tab-pane" role="tabpanel">
-        <label for="text-content">
-          Message or Serial Number
-          <textarea id="text-content" name="text_content" placeholder="Enter any text here..."></textarea>
-        </label>
+      <div id="pane-text" class="tab-pane">
+        <label for="text-content">Content <textarea id="text-content" name="text_content"></textarea></label>
       </div>
 
-      <div id="pane-email" class="tab-pane" role="tabpanel">
-        <label for="email-to">Send To <input type="email" id="email-to" name="email_to" placeholder="hello@example.com"></label>
-        <label for="email-sub">Subject <input type="text" id="email-sub" name="email_sub"></label>
-        <label for="email-body">Body <textarea id="email-body" name="email_body"></textarea></label>
+      <div id="pane-email" class="tab-pane">
+        <label for="email-to">To <input type="email" id="email-to" name="email_to"></label>
       </div>
       
-      <hr style="border:0; border-top:1px solid var(--border); margin: .5rem 0;">
-
-  <label for="mode">
-    Style
-    <select name="mode" id="mode" onchange="toggleMode()" aria-describedby="mode-hint">
-      <option value="designer" selected>✨ Designer — dotted, rounded, with a centred logo</option>
-      <option value="plain">Plain — classic square QR with optional logo</option>
-      <option value="halftone">Halftone — QR rendered from a photograph</option>
-    </select>
-    <span id="mode-hint" class="hint">Designer is the most stylish. Plain is the most universally compatible.</span>
-  </label>
-
-  <fieldset>
-    <legend>Colours</legend>
-    <div class="colors">
-      <label for="fg-hex">Foreground (dots/dark parts)
-        <div class="color-pair">
-          <input type="color" id="fg-picker" value="#092370" aria-label="Foreground colour picker">
-          <input type="text" name="fg" id="fg-hex" value="#092370" maxlength="7" aria-label="Foreground hex code">
-        </div>
+      <label for="mode">Style
+        <select name="mode" id="mode">
+          <option value="designer" selected>✨ Designer</option>
+          <option value="plain">Plain</option>
+          <option value="halftone">Halftone</option>
+        </select>
       </label>
-      <label for="bg-hex">Background
-        <div class="color-pair">
-          <input type="color" id="bg-picker" value="#FFFFFF" aria-label="Background colour picker">
-          <input type="text" name="bg" id="bg-hex" value="#FFFFFF" maxlength="7" aria-label="Background hex code">
+
+      <fieldset>
+        <legend>Colours</legend>
+        <div class="row">
+          <label for="fg">Foreground
+            <div class="color-picker-group">
+              <input type="color" id="fg" name="fg" value="#092370">
+              <input type="text" id="fg-text" value="#092370" pattern="^#[0-9A-Fa-f]{6}$">
+            </div>
+            <label class="checkbox-row" style="margin-top: 0.5rem;">
+              <input type="checkbox" id="enable-gradient"> Enable gradient (Designer mode)
+            </label>
+          </label>
+          <label for="bg">Background
+            <div class="color-picker-group">
+              <input type="color" id="bg" name="bg" value="#FFFFFF">
+              <input type="text" id="bg-text" value="#FFFFFF" pattern="^#[0-9A-Fa-f]{6}$">
+            </div>
+            <label class="checkbox-row" style="margin-top: 0.5rem;">
+              <input type="checkbox" name="transparent" id="transparent" value="1">
+              Transparent bg
+            </label>
+          </label>
         </div>
-      </label>
-    </div>
-    <div>
-      <span class="hint">Quick presets:</span>
-      <div class="preset" role="group" aria-label="Colour presets">
-        <button type="button" onclick="setColors('#000000','#FFFFFF')"><span class="swatch" style="background:#000"></span>Classic</button>
-        <button type="button" onclick="setColors('#E84C89','#FFFFFF')"><span class="swatch" style="background:#E84C89"></span>Pink</button>
-        <button type="button" onclick="setColors('#092370','#FFFFFF')"><span class="swatch" style="background:#092370"></span>Navy</button>
-        <button type="button" onclick="setColors('#4A2C4E','#FFFFFF')"><span class="swatch" style="background:#4A2C4E"></span>Plum</button>
-        <button type="button" onclick="setColors('#1B4332','#FFFFFF')"><span class="swatch" style="background:#1B4332"></span>Forest</button>
-      </div>
-      <span class="hint" style="margin-top:.5rem;display:block">Keep good contrast between foreground and background, or scanners will struggle.</span>
-    </div>
-  </fieldset>
 
-  <fieldset id="designer-options">
-    <legend>Designer QR options</legend>
+        <div id="gradient-group" class="row hidden">
+          <label for="fg2">Gradient End
+            <div class="color-picker-group">
+              <input type="color" id="fg2" name="fg2" value="#d82b6b" disabled>
+              <input type="text" id="fg2-text" value="#d82b6b" disabled>
+            </div>
+          </label>
+          <div></div>
+        </div>
+      </fieldset>
 
-    <label for="centershape">
-      Centre shape
-      <select name="centershape" id="centershape" onchange="toggleCenterSize()">
-        <option value="circle" selected>Circle (with ring)</option>
-        <option value="square">Rounded square</option>
-        <option value="none">None — logo only, no shape</option>
-      </select>
-      <span class="hint">The clear area in the middle where your logo sits.</span>
-    </label>
+      <fieldset id="designer-options">
+        <legend>Designer</legend>
+        <label for="photo-designer">Logo <input type="file" name="photo_designer" id="photo-designer"></label>
+      </fieldset>
 
-    <label for="centersize" id="centersize-label">
-      Centre size: <span id="centersize-value">14</span>%
-      <input type="range" name="centersize" id="centersize" min="8" max="22" value="14"
-             oninput="document.getElementById('centersize-value').textContent = this.value">
-      <span class="hint">How big the centre shape is. Bigger = more space for logo, but slightly less robust scanning.</span>
-    </label>
+      <fieldset id="halftone-options" class="hidden">
+        <legend>Halftone</legend>
+        <label for="photo-halftone">Photo <input type="file" name="photo_halftone" id="photo-halftone"></label>
+      </fieldset>
 
-    <label class="checkbox-row" for="transparent">
-      <input type="checkbox" name="transparent" id="transparent" value="1">
-      Transparent background (PNG)
-    </label>
-    <span class="hint" style="margin-top:-.75rem">Outputs a PNG with transparency outside the QR pattern. Great for placing on coloured cards or invitations. Centre shape and finder squares stay solid for scannability.</span>
+      <fieldset class="advanced-settings">
+        <legend>Advanced</legend>
+        <div class="row">
+          <label for="size">Size (px) <input type="number" name="size" id="size" value="1200"></label>
+          <label for="format">Format
+            <select name="format" id="format">
+              <option value="png">PNG (Raster)</option>
+              <option value="svg">SVG (Vector - Plain style only)</option>
+            </select>
+          </label>
+        </div>
+      </fieldset>
 
-    <label for="photo-designer">
-      Centre logo (optional)
-      <input type="file" name="photo_designer" id="photo-designer" accept="image/png,image/jpeg,image/webp">
-      <span class="hint">A simple icon or silhouette works best. Square aspect, light background.</span>
-    </label>
-  </fieldset>
-
-  <fieldset id="halftone-options" class="hidden">
-    <legend>Halftone QR — photograph</legend>
-    <label for="photo-halftone">
-      Photograph (required)
-      <input type="file" name="photo_halftone" id="photo-halftone" accept="image/png,image/jpeg,image/webp">
-      <span class="hint">High-contrast portraits work best. Square photos. The subject becomes a textured pattern made from QR data.</span>
-    </label>
-  </fieldset>
-
-  <fieldset id="plain-options" class="hidden">
-    <legend>Plain QR — nothing else to configure</legend>
-    <p class="hint" style="margin:0">A simple, classic QR. No logo. Maximum scanning reliability.</p>
-  </fieldset>
-
-  <label for="size">
-    Output size (px)
-    <input type="number" name="size" id="size" value="1200" min="400" max="3000" step="50">
-    <span class="hint">Bigger = sharper when printed. 1200px is great for most uses; bump to 2000+ for large posters.</span>
-  </label>
-
-    <div>
       <button type="submit" class="go" id="generate-btn">
         <span id="btn-label">Generate QR code →</span>
       </button>
-    </div>
-  </form>
-</div>
+    </form>
+  </div>
 
-<div class="right-col">
-  <div class="preview-wrapper">
+  <div class="right-col">
     <div class="preview glass-panel" id="preview" aria-live="polite">
-      
-      <div id="preview-placeholder" class="preview-placeholder">
-        <div style="font-size:3rem;margin-bottom:.5rem;opacity:0.5">🪄</div>
-        Fill out the form and click Generate to see your QR code here.
-      </div>
-
+      <div id="preview-placeholder" class="preview-placeholder">Fill out the form and click Generate.</div>
       <div class="preview-status hidden" id="preview-status"></div>
       <img id="qr-img" alt="Generated QR code" style="display:none">
       <div id="preview-error" class="preview-error hidden"></div>
       <div class="preview-actions" id="preview-actions" style="display:none">
         <a id="download-btn" class="btn-download" download="qrcode.png" href="#">⬇ Download</a>
-        <button type="button" id="share-btn" class="btn-share" style="display:none">↗ Share</button>
+        <button type="button" id="share-btn" class="btn-share">📤 Share</button>
       </div>
-      <div class="download-hint hidden" id="dl-hint">
+      <div class="download-hint hidden" id="dl-hint" style="margin-top:1rem; font-size:0.9rem">
         <strong>Before printing:</strong> Always test-scan with at least 2 different phones to ensure reliability.
       </div>
     </div>
   </div>
 </div>
 
-</div> <!-- main-wrapper end -->
-
-<footer>
-  <?= APP_NAME ?> is free, open-source, and ad-free. Built with care.<br>
-  Self-host it on your own server — your data, your control. <a href="https://github.com/demiswc/directqr" target="_blank" rel="noopener">View source &amp; installation guide on GitHub</a>.
-</footer>
-
 </div>
 
 <script>
-// --- Tabs Logic ---
 const tabBtns = document.querySelectorAll('.tab-btn');
 const tabPanes = document.querySelectorAll('.tab-pane');
 const typeInput = document.getElementById('content_type');
-const urlInput = document.getElementById('url'); // Need to toggle required attribute
+const mode = document.getElementById('mode');
+const fg = document.getElementById('fg'), fgText = document.getElementById('fg-text');
+const bg = document.getElementById('bg'), bgText = document.getElementById('bg-text');
+const enableGradient = document.getElementById('enable-gradient');
+const gradientGroup = document.getElementById('gradient-group');
+const fg2 = document.getElementById('fg2'), fg2Text = document.getElementById('fg2-text');
+const designerOptions = document.getElementById('designer-options');
+const halftoneOptions = document.getElementById('halftone-options');
+const formatSelect = document.getElementById('format');
 
 tabBtns.forEach(btn => {
   btn.addEventListener('click', () => {
-    // Remove active from all
-    tabBtns.forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); });
+    tabBtns.forEach(b => b.classList.remove('active'));
     tabPanes.forEach(p => p.classList.remove('active'));
-    
-    // Add active to clicked
     btn.classList.add('active');
-    btn.setAttribute('aria-selected', 'true');
-    const targetPaneId = btn.getAttribute('data-target');
-    document.getElementById(targetPaneId).classList.add('active');
-    
-    // Update hidden input
-    typeInput.value = targetPaneId.replace('pane-', '');
-    
-    // Manage required attribute (only require URL if URL tab is active, we'll validate server-side mostly)
-    if (typeInput.value === 'url') urlInput.setAttribute('required', 'required');
-    else urlInput.removeAttribute('required');
+    document.getElementById(btn.getAttribute('data-target')).classList.add('active');
+    typeInput.value = btn.getAttribute('data-target').replace('pane-', '');
   });
 });
 
-// --- Colour picker binding ---
-function bindPair(p, h) {
-  const picker = document.getElementById(p), hex = document.getElementById(h);
-  picker.addEventListener('input', () => hex.value = picker.value.toUpperCase());
-  hex.addEventListener('input', () => {
-    let v = hex.value.trim();
-    if (v[0] !== '#') v = '#' + v;
-    if (/^#[0-9A-Fa-f]{6}$/.test(v)) picker.value = v.toLowerCase();
+const syncColors = (picker, text) => {
+  picker.addEventListener('input', () => text.value = picker.value.toUpperCase());
+  text.addEventListener('input', () => {
+    if (/^#[0-9A-Fa-f]{6}$/.test(text.value)) picker.value = text.value;
   });
-  hex.addEventListener('blur', () => hex.value = hex.value.toUpperCase());
-}
-bindPair('fg-picker', 'fg-hex');
-bindPair('bg-picker', 'bg-hex');
+};
+syncColors(fg, fgText); syncColors(bg, bgText); syncColors(fg2, fg2Text);
 
-function setColors(fg, bg) {
-  document.getElementById('fg-picker').value = fg.toLowerCase();
-  document.getElementById('bg-picker').value = bg.toLowerCase();
-  document.getElementById('fg-hex').value = fg.toUpperCase();
-  document.getElementById('bg-hex').value = bg.toUpperCase();
-}
+enableGradient.addEventListener('change', () => {
+  gradientGroup.classList.toggle('hidden', !enableGradient.checked);
+  fg2.disabled = !enableGradient.checked;
+  fg2Text.disabled = !enableGradient.checked;
+});
 
-function toggleMode() {
-  const m = document.getElementById('mode').value;
-  document.getElementById('plain-options').classList.toggle('hidden', m !== 'plain');
-  document.getElementById('designer-options').classList.toggle('hidden', m !== 'designer');
-  document.getElementById('halftone-options').classList.toggle('hidden', m !== 'halftone');
-}
-
-function toggleCenterSize() {
-  const shape = document.getElementById('centershape').value;
-  document.getElementById('centersize-label').style.display = shape === 'none' ? 'none' : 'grid';
-}
-
-toggleMode();
-toggleCenterSize();
-
-// --- QR generation via fetch + Blob ---
-let currentBlobUrl = null;
+mode.addEventListener('change', () => {
+  designerOptions.classList.add('hidden');
+  halftoneOptions.classList.add('hidden');
+  
+  if (mode.value !== 'designer') {
+    enableGradient.disabled = true;
+    enableGradient.parentElement.style.opacity = '0.5';
+  } else {
+    enableGradient.disabled = false;
+    enableGradient.parentElement.style.opacity = '1';
+  }
+  
+  if (mode.value === 'plain') {
+    formatSelect.disabled = false;
+  } else {
+    formatSelect.value = 'png';
+    formatSelect.disabled = true;
+  }
+  if (mode.value === 'designer') designerOptions.classList.remove('hidden');
+  else if (mode.value === 'halftone') halftoneOptions.classList.remove('hidden');
+});
 
 document.getElementById('qr-form').addEventListener('submit', async function(e) {
   e.preventDefault();
-
-  const btn       = document.getElementById('generate-btn');
-  const btnLabel  = document.getElementById('btn-label');
-  const preview   = document.getElementById('preview');
-  const status    = document.getElementById('preview-status');
-  const img       = document.getElementById('qr-img');
-  const errorEl   = document.getElementById('preview-error');
-  const actions   = document.getElementById('preview-actions');
-  const dlBtn     = document.getElementById('download-btn');
-  const shareBtn  = document.getElementById('share-btn');
-
-  const placeholder = document.getElementById('preview-placeholder');
-  const dlHint    = document.getElementById('dl-hint');
-
   // Disable button + show spinner
   btn.disabled = true;
   btnLabel.innerHTML = '<span class="spinner"></span> Generating…';
