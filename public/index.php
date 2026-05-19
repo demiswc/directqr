@@ -613,15 +613,21 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     padding: 1.5rem;
   }
 
+  /* Promise & Details */
+  .info-sections { display: grid; gap: 1rem; margin-bottom: 1.5rem; }
   .promise, details { 
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 1rem 1.25rem; font-size: .95rem;
     backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
   }
+  .promise strong { font-size: 1rem; font-weight: 600; }
   .promise ul { margin: .5rem 0 0; padding-left: 1.2rem; }
+  .promise li { margin: .3rem 0; }
   .promise li::marker { content: "✓ "; color: var(--pink); font-weight: bold; }
   details summary { font-weight: 600; cursor: pointer; padding: .25rem 0; outline-offset: 3px; }
   details[open] summary { margin-bottom: .5rem; color: var(--pink); }
+  details ol { padding-left: 1.2rem; margin: .5rem 0; }
+  details li { margin: .35rem 0; }
 
   form { display: grid; gap: 1.25rem; }
   label { display: grid; gap: .4rem; font-weight: 500; font-size: .95rem; }
@@ -675,7 +681,22 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
   }
   
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 480px) { .row { grid-template-columns: 1fr; } }
   .colors { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 480px) { .colors { grid-template-columns: 1fr; } }
+  
+  .preset { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .4rem; }
+  .preset button {
+    border: 1px solid var(--border); background: var(--card-solid); padding: .5rem .8rem;
+    border-radius: 8px; cursor: pointer; font-size: .85rem; color: var(--text);
+    display: inline-flex; align-items: center; gap: .4rem; transition: border-color 0.2s, transform 0.1s;
+    min-height: 44px; font-weight: 500;
+  }
+  .preset button:hover { border-color: var(--pink); transform: translateY(-1px); }
+  .preset button span.swatch {
+    display: inline-block; width: 16px; height: 16px; border-radius: 4px;
+    border: 1px solid rgba(0,0,0,.15); box-shadow: inset 0 1px 2px rgba(255,255,255,0.2);
+  }
   
   fieldset {
     border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem;
@@ -689,6 +710,8 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     transition: all 0.2s; width: 100%; box-shadow: 0 4px 15px rgba(232, 76, 137, 0.3);
     display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
   }
+  button.go:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(232, 76, 137, 0.4); }
+  button.go:active { transform: translateY(0); }
   
   .spinner {
     display: inline-block; width: 20px; height: 20px;
@@ -727,9 +750,23 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     transition: all 0.2s; min-height: 48px;
   }
   .btn-download { background: var(--pink); color: #fff; border: 2px solid var(--pink); }
+  .btn-download:hover { background: var(--pink-dark); border-color: var(--pink-dark); transform: translateY(-1px); }
   .btn-share { background: var(--card-solid); color: var(--text); border: 2px solid var(--border); }
+  .btn-share:hover { border-color: var(--pink); color: var(--pink); transform: translateY(-1px); }
   
   .hidden { display: none !important; }
+  footer {
+    text-align: center; font-size: 0.9rem; color: var(--muted); padding: 2rem 1rem;
+    margin-top: 3rem; border-top: 1px solid var(--border);
+  }
+  footer a { color: var(--pink); text-decoration: none; font-weight: 500; }
+  footer a:hover { text-decoration: underline; }
+  
+  @media (max-width: 400px) {
+    body { padding: 1rem; }
+    .glass-panel { padding: 1.25rem; }
+    .preview-actions a, .preview-actions button { padding: .7rem 1rem; font-size: .9rem; width: 100%; justify-content: center;}
+  }
   footer {
     text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: .9rem;
     margin-top: 3rem; border-top: 1px solid var(--border);
@@ -747,6 +784,31 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
 <div class="main-wrapper">
   
   <div class="left-col">
+    <div class="info-sections">
+      <section class="promise" aria-label="What makes this tool different">
+        <strong>What makes <?= APP_NAME ?> different:</strong>
+        <ul>
+          <li>Your URL is encoded <em>directly</em> in the QR — no redirect service in the middle</li>
+          <li>No tracking, no analytics, no cookies</li>
+          <li>No "free for the first 100 scans, then pay us" trap</li>
+          <li>Works forever as long as your website does</li>
+          <li>Nothing is saved on our server — your data is processed in memory and discarded</li>
+        </ul>
+      </section>
+
+      <details>
+        <summary>How to use it (30 seconds)</summary>
+        <ol>
+          <li><strong>Select a type</strong> — link, Wi-Fi, contact, text, or email</li>
+          <li><strong>Fill in your details</strong></li>
+          <li><strong>Pick a style</strong> — Designer for a stylish dotted QR with a logo, Plain for a classic square QR, or Halftone for a photograph QR</li>
+          <li><strong>Choose colours</strong> and upload a logo/photo if needed</li>
+          <li><strong>Click Generate</strong>, then tap the <strong>Download</strong> button</li>
+        </ol>
+        <p><strong>Important:</strong> always scan your finished QR with a real phone (or two) before printing it. Decorative styles are scannable but slightly less robust than plain QRs.</p>
+      </details>
+    </div>
+
     <form id="qr-form" class="glass-panel" method="post" enctype="multipart/form-data" novalidate>
       <input type="hidden" name="generate" value="1">
       <input type="hidden" name="content_type" id="content_type" value="url">
@@ -826,6 +888,18 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
           </label>
           <div></div>
         </div>
+
+        <div>
+          <span class="hint">Quick presets:</span>
+          <div class="preset" role="group" aria-label="Colour presets">
+            <button type="button" class="preset-btn" data-fg="#000000" data-bg="#FFFFFF"><span class="swatch" style="background:#000"></span>Classic</button>
+            <button type="button" class="preset-btn" data-fg="#E84C89" data-bg="#FFFFFF"><span class="swatch" style="background:#E84C89"></span>Pink</button>
+            <button type="button" class="preset-btn" data-fg="#092370" data-bg="#FFFFFF"><span class="swatch" style="background:#092370"></span>Navy</button>
+            <button type="button" class="preset-btn" data-fg="#4A2C4E" data-bg="#FFFFFF"><span class="swatch" style="background:#4A2C4E"></span>Plum</button>
+            <button type="button" class="preset-btn" data-fg="#1B4332" data-bg="#FFFFFF"><span class="swatch" style="background:#1B4332"></span>Forest</button>
+          </div>
+          <span class="hint" style="margin-top:.5rem;display:block">Keep good contrast between foreground and background, or scanners will struggle.</span>
+        </div>
       </fieldset>
 
       <fieldset id="designer-options">
@@ -858,23 +932,33 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
   </div>
 
   <div class="right-col">
-    <div class="preview glass-panel" id="preview" aria-live="polite">
-      <div id="preview-placeholder" class="preview-placeholder">Fill out the form and click Generate.</div>
-      <div class="preview-status hidden" id="preview-status"></div>
-      <img id="qr-img" alt="Generated QR code" style="display:none">
-      <div id="preview-error" class="preview-error hidden"></div>
-      <div class="preview-actions" id="preview-actions" style="display:none">
-        <a id="download-btn" class="btn-download" download="qrcode.png" href="#">⬇ Download</a>
-        <button type="button" id="share-btn" class="btn-share">📤 Share</button>
-      </div>
-      <div class="download-hint hidden" id="dl-hint" style="margin-top:1rem; font-size:0.9rem">
-        <strong>Before printing:</strong> Always test-scan with at least 2 different phones to ensure reliability.
+    <div class="preview-wrapper">
+      <div class="preview glass-panel" id="preview" aria-live="polite">
+        <div id="preview-placeholder" class="preview-placeholder">
+          <div style="font-size:3rem;margin-bottom:.5rem;opacity:0.5">🪄</div>
+          Fill out the form and click Generate.
+        </div>
+        <div class="preview-status hidden" id="preview-status"></div>
+        <img id="qr-img" alt="Generated QR code" style="display:none">
+        <div id="preview-error" class="preview-error hidden"></div>
+        <div class="preview-actions" id="preview-actions" style="display:none">
+          <a id="download-btn" class="btn-download" download="qrcode.png" href="#">⬇ Download</a>
+          <button type="button" id="share-btn" class="btn-share">📤 Share</button>
+        </div>
+        <div class="download-hint hidden" id="dl-hint" style="margin-top:1rem; font-size:0.9rem">
+          <strong>Before printing:</strong> Always test-scan with at least 2 different phones to ensure reliability.
+        </div>
       </div>
     </div>
   </div>
 </div>
 
 </div>
+
+<footer>
+  <?= APP_NAME ?> is free, open-source, and ad-free. Built with care.<br>
+  Self-host it on your own server — your data, your control. <a href="https://github.com/demiswc/directqr" target="_blank" rel="noopener">View source &amp; installation guide on GitHub</a>.
+</footer>
 
 <script>
 const tabBtns = document.querySelectorAll('.tab-btn');
@@ -908,6 +992,26 @@ const syncColors = (picker, text) => {
 };
 syncColors(fg, fgText); syncColors(bg, bgText); syncColors(fg2, fg2Text);
 
+// Presets
+document.querySelectorAll('.preset-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    fg.value = btn.dataset.fg;
+    fgText.value = btn.dataset.fg;
+    bg.value = btn.dataset.bg;
+    bgText.value = btn.dataset.bg;
+    
+    // Auto-set a nice gradient if enabled
+    if (enableGradient.checked) {
+      if (btn.dataset.fg === '#000000') fg2.value = '#555555';
+      else if (btn.dataset.fg === '#E84C89') fg2.value = '#8a2387';
+      else if (btn.dataset.fg === '#092370') fg2.value = '#00c6ff';
+      else if (btn.dataset.fg === '#4A2C4E') fg2.value = '#e96443';
+      else if (btn.dataset.fg === '#1B4332') fg2.value = '#90d5ec';
+      fg2Text.value = fg2.value.toUpperCase();
+    }
+  });
+});
+
 enableGradient.addEventListener('change', () => {
   gradientGroup.classList.toggle('hidden', !enableGradient.checked);
   fg2.disabled = !enableGradient.checked;
@@ -936,8 +1040,22 @@ mode.addEventListener('change', () => {
   else if (mode.value === 'halftone') halftoneOptions.classList.remove('hidden');
 });
 
+let currentBlobUrl = null;
+
 document.getElementById('qr-form').addEventListener('submit', async function(e) {
   e.preventDefault();
+
+  const btn       = document.getElementById('generate-btn');
+  const btnLabel  = document.getElementById('btn-label');
+  const status    = document.getElementById('preview-status');
+  const img       = document.getElementById('qr-img');
+  const errorEl   = document.getElementById('preview-error');
+  const actions   = document.getElementById('preview-actions');
+  const dlBtn     = document.getElementById('download-btn');
+  const shareBtn  = document.getElementById('share-btn');
+  const placeholder = document.getElementById('preview-placeholder');
+  const dlHint    = document.getElementById('dl-hint');
+
   // Disable button + show spinner
   btn.disabled = true;
   btnLabel.innerHTML = '<span class="spinner"></span> Generating…';
