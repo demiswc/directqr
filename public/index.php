@@ -363,22 +363,68 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
         exit;
     }
 
-    $url       = trim($_POST['url']       ?? $_GET['url']       ?? '');
-    $mode      = $_POST['mode']      ?? $_GET['mode']      ?? 'designer';
-    $size      = (int)($_POST['size']      ?? $_GET['size']      ?? 1200);
-    $size      = max(400, min($size, 3000));  // clamp
+    $contentType = $_POST['content_type'] ?? 'url';
+    $qrData = '';
+
+    if ($contentType === 'url') {
+        $qrData = trim($_POST['url'] ?? '');
+        if ($qrData === '' || !preg_match('~^[a-z][a-z0-9+\-.]*://~i', $qrData)) {
+            http_response_code(400); header('Content-Type: text/plain');
+            echo "Please provide a valid URL starting with http:// or https://"; exit;
+        }
+    } elseif ($contentType === 'wifi') {
+        $ssid = trim($_POST['wifi_ssid'] ?? '');
+        $pass = trim($_POST['wifi_pass'] ?? '');
+        $enc  = $_POST['wifi_enc'] ?? 'WPA';
+        $hid  = !empty($_POST['wifi_hidden']) ? 'true' : 'false';
+        if ($ssid === '') {
+            http_response_code(400); header('Content-Type: text/plain');
+            echo "Please provide a Network Name (SSID) for the Wi-Fi."; exit;
+        }
+        $qrData = "WIFI:S:{$ssid};T:{$enc};P:{$pass};H:{$hid};;";
+    } elseif ($contentType === 'vcard') {
+        $fn = trim($_POST['vc_fname'] ?? '');
+        $ln = trim($_POST['vc_lname'] ?? '');
+        $org = trim($_POST['vc_org'] ?? '');
+        $title = trim($_POST['vc_title'] ?? '');
+        $tel = trim($_POST['vc_tel'] ?? '');
+        $email = trim($_POST['vc_email'] ?? '');
+        $vurl = trim($_POST['vc_url'] ?? '');
+        $qrData = "BEGIN:VCARD\nVERSION:3.0\n";
+        $qrData .= "N:{$ln};{$fn};;;\nFN:{$fn} {$ln}\n";
+        if ($org) $qrData .= "ORG:{$org}\n";
+        if ($title) $qrData .= "TITLE:{$title}\n";
+        if ($tel) $qrData .= "TEL:{$tel}\n";
+        if ($email) $qrData .= "EMAIL:{$email}\n";
+        if ($vurl) $qrData .= "URL:{$vurl}\n";
+        $qrData .= "END:VCARD";
+    } elseif ($contentType === 'text') {
+        $qrData = trim($_POST['text_content'] ?? '');
+        if ($qrData === '') {
+            http_response_code(400); header('Content-Type: text/plain');
+            echo "Please provide some text."; exit;
+        }
+    } elseif ($contentType === 'email') {
+        $to = trim($_POST['email_to'] ?? '');
+        $sub = trim($_POST['email_sub'] ?? '');
+        $body = trim($_POST['email_body'] ?? '');
+        if ($to === '') {
+            http_response_code(400); header('Content-Type: text/plain');
+            echo "Please provide an email address."; exit;
+        }
+        $qrData = "MATMSG:TO:{$to};SUB:{$sub};BODY:{$body};;";
+    }
+    
+    $url = $qrData; // Alias for backward compatibility with render functions
+
+    $mode         = $_POST['mode'] ?? $_GET['mode'] ?? 'designer';
+    $size         = (int)($_POST['size'] ?? $_GET['size'] ?? 1200);
+    $size         = max(400, min($size, 3000));  // clamp
     $transparent  = !empty($_POST['transparent']);
-    $centerShape  = $_POST['centershape']  ?? 'circle';
+    $centerShape  = $_POST['centershape'] ?? 'circle';
     if (!in_array($centerShape, ['circle', 'square', 'none'])) $centerShape = 'circle';
     $centerSize   = (int)($_POST['centersize'] ?? 14);
     $centerSize   = max(0, min($centerSize, 25));
-
-    if ($url === '' || !preg_match('~^[a-z][a-z0-9+\-.]*://~i', $url)) {
-        http_response_code(400);
-        header('Content-Type: text/plain');
-        echo "Please provide a valid URL starting with http:// or https://";
-        exit;
-    }
 
     $fgHex = preg_replace('/[^0-9a-fA-F]/', '', $_POST['fg'] ?? $_GET['fg'] ?? '000000') ?: '000000';
     $bgHex = preg_replace('/[^0-9a-fA-F]/', '', $_POST['bg'] ?? $_GET['bg'] ?? 'FFFFFF') ?: 'FFFFFF';
@@ -389,10 +435,10 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
 
     if ($mode === 'designer') {
         $logoPath = null;
-        if (!empty($_FILES['photo']['name'])) {
-            $err = validate_upload($_FILES['photo'], $MAX_UPLOAD_BYTES, $MAX_DIMENSION);
+        if (!empty($_FILES['photo_designer']['name'])) {
+            $err = validate_upload($_FILES['photo_designer'], $MAX_UPLOAD_BYTES, $MAX_DIMENSION);
             if ($err) { http_response_code(400); header('Content-Type:text/plain'); echo $err; exit; }
-            $logoPath = $_FILES['photo']['tmp_name'];
+            $logoPath = $_FILES['photo_designer']['tmp_name'];
         }
         try {
             $png = render_designer_qr($url, $logoPath, [$fR,$fG,$fB], [$bR,$bG,$bB], $size, $transparent, $centerShape, $centerSize);
@@ -409,16 +455,16 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     }
 
     if ($mode === 'halftone') {
-        if (empty($_FILES['photo']['name'])) {
+        if (empty($_FILES['photo_halftone']['name'])) {
             http_response_code(400);
             header('Content-Type:text/plain');
             echo "Please upload a photograph for halftone mode.";
             exit;
         }
-        $err = validate_upload($_FILES['photo'], $MAX_UPLOAD_BYTES, $MAX_DIMENSION);
+        $err = validate_upload($_FILES['photo_halftone'], $MAX_UPLOAD_BYTES, $MAX_DIMENSION);
         if ($err) { http_response_code(400); header('Content-Type:text/plain'); echo $err; exit; }
         try {
-            $png = render_halftone_qr($url, $_FILES['photo']['tmp_name'], $size);
+            $png = render_halftone_qr($url, $_FILES['photo_halftone']['tmp_name'], $size);
             header('Content-Type: image/png');
             header('Content-Disposition: inline; filename="qrcode.png"');
             echo $png; exit;
@@ -462,178 +508,250 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Free QR code generator. Your URL goes directly in the QR — no redirects, no tracking, no expiry. Forever.">
 <meta name="robots" content="index, follow">
+<?php
+    $baseUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") . "://$_SERVER[HTTP_HOST]" . dirname($_SERVER['REQUEST_URI']);
+    $ogImageUrl = rtrim($baseUrl, '/') . '/og-image.png';
+?>
+<meta property="og:title" content="<?= APP_NAME ?> — <?= APP_TAGLINE ?>">
+<meta property="og:description" content="Free QR code generator. Your URL goes directly in the QR — no redirects, no tracking, no expiry. Forever.">
+<meta property="og:image" content="<?= $ogImageUrl ?>">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
 <title><?= APP_NAME ?> — <?= APP_TAGLINE ?></title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --pink: #E84C89; --pink-dark: #d23a77;
     --navy: #092370; --text: #1a1a1a; --muted: #666;
-    --bg: #fafafa; --card: #ffffff; --border: #e5e5e5;
-    --focus: #4A90E2;
+    --bg-mesh: radial-gradient(at 40% 20%, hsla(28,100%,74%,0.15) 0px, transparent 50%),
+               radial-gradient(at 80% 0%, hsla(189,100%,56%,0.15) 0px, transparent 50%),
+               radial-gradient(at 0% 50%, hsla(355,100%,93%,0.15) 0px, transparent 50%),
+               radial-gradient(at 80% 50%, hsla(340,100%,76%,0.15) 0px, transparent 50%),
+               radial-gradient(at 0% 100%, hsla(22,100%,77%,0.15) 0px, transparent 50%),
+               radial-gradient(at 80% 100%, hsla(242,100%,70%,0.15) 0px, transparent 50%),
+               radial-gradient(at 0% 0%, hsla(343,100%,76%,0.15) 0px, transparent 50%);
+    --bg: #f8f9fa; --card: rgba(255, 255, 255, 0.75); --card-solid: #ffffff;
+    --border: rgba(0, 0, 0, 0.08); --border-hover: rgba(0, 0, 0, 0.2);
+    --focus: #E84C89; --shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+    --glass-blur: blur(12px);
   }
   @media (prefers-color-scheme: dark) {
-    :root { --text: #f0f0f0; --muted: #aaa; --bg: #1a1a1a; --card: #2a2a2a; --border: #3a3a3a; }
+    :root { 
+      --text: #f0f0f0; --muted: #aaa; 
+      --bg: #0f1115; 
+      --bg-mesh: radial-gradient(at 40% 20%, hsla(28,100%,74%,0.08) 0px, transparent 50%),
+                 radial-gradient(at 80% 0%, hsla(189,100%,56%,0.08) 0px, transparent 50%),
+                 radial-gradient(at 0% 50%, hsla(355,100%,93%,0.08) 0px, transparent 50%),
+                 radial-gradient(at 80% 50%, hsla(340,100%,76%,0.08) 0px, transparent 50%),
+                 radial-gradient(at 0% 100%, hsla(22,100%,77%,0.08) 0px, transparent 50%),
+                 radial-gradient(at 80% 100%, hsla(242,100%,70%,0.08) 0px, transparent 50%),
+                 radial-gradient(at 0% 0%, hsla(343,100%,76%,0.08) 0px, transparent 50%);
+      --card: rgba(30, 32, 40, 0.6); --card-solid: #1e2028;
+      --border: rgba(255, 255, 255, 0.08); --border-hover: rgba(255, 255, 255, 0.2);
+      --shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+    }
   }
   * { box-sizing: border-box; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    line-height: 1.5; color: var(--text); background: var(--bg);
-    margin: 0; padding: 1rem;
+    font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: var(--text); background-color: var(--bg);
+    background-image: var(--bg-mesh); background-attachment: fixed;
+    margin: 0; padding: 1.5rem; min-height: 100vh;
   }
-  .container { max-width: 780px; margin: 0 auto; }
-  header { text-align: center; padding: 1.5rem 0 1rem; }
-  h1 { font-size: clamp(1.8rem, 5vw, 2.4rem); margin: 0 0 .5rem; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  header { text-align: center; padding: 1rem 0 2.5rem; }
+  h1 { font-size: clamp(2rem, 5vw, 3rem); font-weight: 700; margin: 0 0 .5rem; letter-spacing: -0.02em; }
   h1 span { color: var(--pink); }
-  .tagline { color: var(--muted); margin: 0; font-size: 1.05rem; }
-  .promise {
+  .tagline { color: var(--muted); margin: 0; font-size: 1.15rem; font-weight: 300; }
+  
+  .main-wrapper {
+    display: grid; grid-template-columns: 1.2fr 1fr; gap: 2rem; align-items: start;
+  }
+  @media (max-width: 850px) { .main-wrapper { grid-template-columns: 1fr; } }
+
+  .glass-panel {
+    background: var(--card); border: 1px solid var(--border); 
+    border-radius: 16px; box-shadow: var(--shadow);
+    backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+    padding: 1.5rem;
+  }
+
+  /* Promise & Details */
+  .info-sections { display: grid; gap: 1rem; margin-bottom: 1.5rem; }
+  .promise, details { 
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    padding: 1rem 1.25rem; margin: 1.5rem 0; display: grid; gap: .4rem; font-size: .9rem;
+    padding: 1rem 1.25rem; font-size: .95rem;
+    backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
   }
-  .promise strong { color: var(--text); font-size: .95rem; }
-  .promise ul { margin: .25rem 0 0; padding-left: 1.2rem; }
-  .promise li { margin: .2rem 0; }
-  .promise li::marker { content: "✓ "; color: var(--pink); }
-  details {
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    padding: .75rem 1.25rem; margin: 1rem 0;
-  }
-  details summary {
-    font-weight: 600; cursor: pointer; padding: .5rem 0;
-    outline-offset: 3px;
-  }
-  details[open] summary { margin-bottom: .5rem; }
+  .promise strong { font-size: 1rem; font-weight: 600; }
+  .promise ul { margin: .5rem 0 0; padding-left: 1.2rem; }
+  .promise li { margin: .3rem 0; }
+  .promise li::marker { content: "✓ "; color: var(--pink); font-weight: bold; }
+  details summary { font-weight: 600; cursor: pointer; padding: .25rem 0; outline-offset: 3px; }
+  details[open] summary { margin-bottom: .5rem; color: var(--pink); }
   details ol { padding-left: 1.2rem; margin: .5rem 0; }
   details li { margin: .35rem 0; }
-  form {
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    padding: 1.5rem; display: grid; gap: 1.25rem;
+
+  /* Form Elements */
+  form { display: grid; gap: 1.25rem; }
+  label { display: grid; gap: .4rem; font-weight: 500; font-size: .95rem; }
+  .hint { font-size: .85rem; color: var(--muted); font-weight: 300; }
+  
+  input[type=text], input[type=url], input[type=email], input[type=tel], input[type=number], input[type=file], select, textarea {
+    padding: .75rem 1rem; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 1rem; background: var(--card-solid); color: var(--text); font-family: inherit;
+    width: 100%; min-width: 0; transition: border-color 0.2s, box-shadow 0.2s;
   }
-  label { display: grid; gap: .3rem; font-weight: 500; font-size: .92rem; }
-  .hint { font-size: .82rem; color: var(--muted); font-weight: 400; }
-  input[type=text], input[type=url], input[type=number], input[type=file], select {
-    padding: .65rem .8rem; border: 1px solid var(--border); border-radius: 7px;
-    font-size: 1rem; background: var(--bg); color: var(--text); font-family: inherit;
-    width: 100%; min-width: 0;
+  textarea { resize: vertical; min-height: 80px; }
+  input[type=file] { padding: .6rem .8rem; }
+  input:focus, select:focus, textarea:focus, button:focus {
+    outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px rgba(232, 76, 137, 0.15);
   }
-  input[type=file] { padding: .5rem .8rem; }
-  input:focus, select:focus, button:focus {
-    outline: 2px solid var(--focus); outline-offset: 2px;
+  input:hover:not(:focus), select:hover:not(:focus), textarea:hover:not(:focus) { border-color: var(--border-hover); }
+  
+  /* Tabs */
+  .tabs { display: flex; gap: .5rem; border-bottom: 1px solid var(--border); padding-bottom: 1rem; flex-wrap: wrap; }
+  .tab-btn {
+    background: transparent; border: 1px solid var(--border); border-radius: 20px;
+    padding: .5rem 1rem; cursor: pointer; font-family: inherit; font-size: .9rem;
+    font-weight: 500; color: var(--muted); transition: all 0.2s;
   }
+  .tab-btn:hover { border-color: var(--border-hover); color: var(--text); }
+  .tab-btn.active { background: var(--pink); border-color: var(--pink); color: white; box-shadow: 0 4px 12px rgba(232, 76, 137, 0.3); }
+  .tab-pane { display: none; animation: fadeIn 0.3s ease-in-out; }
+  .tab-pane.active { display: grid; gap: 1.25rem; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
   input[type=color] {
-    width: 48px; height: 44px; border: 1px solid var(--border);
-    border-radius: 7px; padding: 2px; cursor: pointer; flex-shrink: 0;
+    width: 50px; height: 46px; border: 1px solid var(--border);
+    border-radius: 8px; padding: 2px; cursor: pointer; flex-shrink: 0;
+    background: var(--card-solid);
   }
-  input[type=range] { width: 100%; touch-action: pan-y; }
-  .checkbox-row { display: flex; align-items: center; gap: .5rem; font-weight: 500; }
-  .checkbox-row input { width: 20px; height: 20px; cursor: pointer; flex-shrink: 0; }
+  input[type=range] { width: 100%; touch-action: pan-y; accent-color: var(--pink); }
+  .checkbox-row { display: flex; align-items: center; gap: .6rem; font-weight: 500; }
+  .checkbox-row input { width: 22px; height: 22px; cursor: pointer; flex-shrink: 0; accent-color: var(--pink); }
+  
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
   @media (max-width: 480px) { .row { grid-template-columns: 1fr; } }
-  /* Colours grid — stack on narrow screens */
   .colors { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
   @media (max-width: 480px) { .colors { grid-template-columns: 1fr; } }
   .color-pair { display: flex; gap: .5rem; align-items: center; min-width: 0; }
-  .color-pair input[type=text] { flex: 1; min-width: 0; font-family: ui-monospace, monospace; text-transform: uppercase; }
-  .preset { display: flex; gap: .4rem; flex-wrap: wrap; }
+  .color-pair input[type=text] { flex: 1; min-width: 0; font-family: ui-monospace, monospace; text-transform: uppercase; font-size: .9rem;}
+  
+  .preset { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .4rem; }
   .preset button {
-    border: 1px solid var(--border); background: var(--bg); padding: .5rem .75rem;
-    border-radius: 6px; cursor: pointer; font-size: .85rem; color: var(--text);
-    display: inline-flex; align-items: center; gap: .35rem;
-    min-height: 44px; /* touch-friendly tap target */
+    border: 1px solid var(--border); background: var(--card-solid); padding: .5rem .8rem;
+    border-radius: 8px; cursor: pointer; font-size: .85rem; color: var(--text);
+    display: inline-flex; align-items: center; gap: .4rem; transition: border-color 0.2s, transform 0.1s;
+    min-height: 44px; font-weight: 500;
   }
-  .preset button:hover { border-color: var(--pink); }
+  .preset button:hover { border-color: var(--pink); transform: translateY(-1px); }
   .preset button span.swatch {
-    display: inline-block; width: 14px; height: 14px; border-radius: 3px;
-    border: 1px solid rgba(0,0,0,.15);
+    display: inline-block; width: 16px; height: 16px; border-radius: 4px;
+    border: 1px solid rgba(0,0,0,.15); box-shadow: inset 0 1px 2px rgba(255,255,255,0.2);
   }
+  
   fieldset {
-    border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.25rem;
-    display: grid; gap: 1rem; margin: 0;
+    border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem;
+    display: grid; gap: 1.25rem; margin: 0; background: rgba(255,255,255,0.02);
   }
-  legend { padding: 0 .5rem; font-weight: 600; }
-  /* Generate button — full width on mobile */
+  legend { padding: 0 .5rem; font-weight: 600; color: var(--pink); }
+  
   button.go {
-    background: var(--pink); color: white; border: 0; padding: .9rem 1.5rem;
-    border-radius: 8px; font-size: 1.05rem; cursor: pointer; font-weight: 600;
-    transition: background .15s, opacity .15s; width: 100%;
+    background: linear-gradient(135deg, var(--pink), #ff6b6b); color: white; border: 0; padding: 1rem 1.5rem;
+    border-radius: 10px; font-size: 1.1rem; cursor: pointer; font-weight: 600;
+    transition: all 0.2s; width: 100%; box-shadow: 0 4px 15px rgba(232, 76, 137, 0.3);
     display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+    font-family: inherit;
   }
-  @media (min-width: 481px) { button.go { width: auto; } }
-  button.go:hover:not(:disabled) { background: var(--pink-dark); }
-  button.go:focus { outline: 3px solid var(--focus); outline-offset: 2px; }
-  button.go:disabled { opacity: .7; cursor: not-allowed; }
+  button.go:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(232, 76, 137, 0.4); }
+  button.go:active:not(:disabled) { transform: translateY(0); }
+  button.go:disabled { opacity: .7; cursor: not-allowed; transform: none; box-shadow: none; }
+  
   /* Spinner */
   .spinner {
-    display: inline-block; width: 18px; height: 18px;
-    border: 2.5px solid rgba(255,255,255,.35);
+    display: inline-block; width: 20px; height: 20px;
+    border: 3px solid rgba(255,255,255,.3);
     border-top-color: #fff; border-radius: 50%;
-    animation: spin .6s linear infinite;
+    animation: spin .7s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  
   /* Preview section */
+  .preview-wrapper { position: sticky; top: 1.5rem; }
   .preview {
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    padding: 1.5rem; margin-top: 1.5rem; text-align: center;
+    text-align: center;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .preview-placeholder {
+    color: var(--muted); font-size: 1.1rem; padding: 3rem 1rem;
+    border: 2px dashed var(--border); border-radius: 12px; width: 100%;
   }
   .preview-status {
     display: flex; align-items: center; justify-content: center; gap: .5rem;
-    margin-bottom: 1rem; font-weight: 600; font-size: 1.05rem;
+    margin-bottom: 1.25rem; font-weight: 600; font-size: 1.1rem; color: var(--pink);
   }
-  .preview-status .checkmark { color: #27ae60; font-size: 1.3rem; }
+  .preview-status .checkmark { color: #27ae60; font-size: 1.4rem; }
   .preview img {
-    width: 100%; max-width: 500px; height: auto; border-radius: 8px;
+    width: 100%; max-width: 450px; height: auto; border-radius: 10px;
     background: repeating-conic-gradient(#f0f0f0 0% 25%, #ffffff 0% 50%) 0 / 20px 20px;
-    image-rendering: pixelated;
+    image-rendering: pixelated; box-shadow: 0 10px 30px rgba(0,0,0,0.1);
   }
+  
   /* Error state */
   .preview-error {
     background: #fdeaea; border: 1px solid #e74c3c; border-radius: 8px;
-    padding: .75rem 1rem; color: #c0392b; font-size: .9rem; margin-top: .75rem;
+    padding: 1rem; color: #c0392b; font-size: .95rem; margin-top: 1rem; width: 100%;
   }
   @media (prefers-color-scheme: dark) {
     .preview-error { background: #3a1f1f; border-color: #6b2a2a; color: #ff8080; }
   }
-  /* Action buttons under the QR */
+  
+  /* Action buttons */
   .preview-actions {
     display: flex; gap: .75rem; justify-content: center; flex-wrap: wrap;
-    margin-top: 1rem;
+    margin-top: 1.5rem; width: 100%;
   }
   .preview-actions a, .preview-actions button {
-    display: inline-flex; align-items: center; gap: .4rem;
-    padding: .7rem 1.25rem; border-radius: 8px; font-size: .95rem;
+    display: inline-flex; align-items: center; gap: .5rem;
+    padding: .75rem 1.5rem; border-radius: 10px; font-size: 1rem;
     font-weight: 600; cursor: pointer; text-decoration: none;
-    transition: background .15s, border-color .15s;
-    min-height: 44px;
+    transition: all 0.2s; min-height: 48px; font-family: inherit;
   }
   .btn-download {
     background: var(--pink); color: #fff; border: 2px solid var(--pink);
+    box-shadow: 0 4px 15px rgba(232, 76, 137, 0.2);
   }
-  .btn-download:hover { background: var(--pink-dark); border-color: var(--pink-dark); }
+  .btn-download:hover { background: var(--pink-dark); border-color: var(--pink-dark); transform: translateY(-1px); }
   .btn-share {
-    background: transparent; color: var(--text); border: 2px solid var(--border);
+    background: var(--card-solid); color: var(--text); border: 2px solid var(--border);
   }
-  .btn-share:hover { border-color: var(--pink); color: var(--pink); }
+  .btn-share:hover { border-color: var(--pink); color: var(--pink); transform: translateY(-1px); }
+  
   .download-hint {
-    background: #fef9e7; border: 1px solid #f4d03f; border-radius: 8px;
-    padding: .75rem 1rem; margin-top: 1rem; font-size: .9rem; color: #6b5800;
-    text-align: left;
+    background: rgba(244, 208, 63, 0.1); border: 1px solid rgba(244, 208, 63, 0.5); border-radius: 8px;
+    padding: .85rem 1rem; margin-top: 1.5rem; font-size: .9rem; color: #8a7300;
+    text-align: left; width: 100%;
   }
   @media (prefers-color-scheme: dark) {
-    .download-hint { background: #3a3a1f; border-color: #5a5a2a; color: #ffe680; }
+    .download-hint { background: rgba(244, 208, 63, 0.05); color: #ffe680; }
   }
-  .hidden { display: none; }
+  
+  .hidden { display: none !important; }
   footer {
-    text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: .85rem;
-    margin-top: 2rem; border-top: 1px solid var(--border);
+    text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: .9rem;
+    margin-top: 3rem; border-top: 1px solid var(--border);
   }
-  footer a { color: var(--pink); }
+  footer a { color: var(--pink); text-decoration: none; font-weight: 500; }
+  footer a:hover { text-decoration: underline; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-  /* Tighten form padding on very small screens */
+  
   @media (max-width: 400px) {
-    body { padding: .75rem; }
-    form { padding: 1rem; }
-    fieldset { padding: .75rem 1rem; }
-    .promise, details { padding: .75rem 1rem; }
-    .preview { padding: 1rem; }
-    .preview-actions a, .preview-actions button { padding: .6rem 1rem; font-size: .88rem; }
+    body { padding: 1rem; }
+    .glass-panel { padding: 1.25rem; }
+    .preview-actions a, .preview-actions button { padding: .7rem 1rem; font-size: .9rem; width: 100%; justify-content: center;}
   }
 </style>
 </head>
@@ -645,41 +763,105 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
   <p class="tagline">Your URL → QR. Nothing in between.</p>
 </header>
 
-<section class="promise" aria-label="What makes this tool different">
-  <strong>What makes <?= APP_NAME ?> different:</strong>
-  <ul>
-    <li>Your URL is encoded <em>directly</em> in the QR — no redirect service in the middle</li>
-    <li>No tracking, no analytics, no cookies</li>
-    <li>No "free for the first 100 scans, then pay us" trap</li>
-    <li>Works forever as long as your website does</li>
-    <li>Nothing is saved on our server — your image and URL are processed in memory and discarded</li>
-  </ul>
-</section>
+<div class="main-wrapper">
+  
+  <div class="left-col">
+    <div class="info-sections">
+      <section class="promise" aria-label="What makes this tool different">
+        <strong>What makes <?= APP_NAME ?> different:</strong>
+        <ul>
+          <li>Your URL is encoded <em>directly</em> in the QR — no redirect service in the middle</li>
+          <li>No tracking, no analytics, no cookies</li>
+          <li>No "free for the first 100 scans, then pay us" trap</li>
+          <li>Works forever as long as your website does</li>
+          <li>Nothing is saved on our server — your data is processed in memory and discarded</li>
+        </ul>
+      </section>
 
-<details>
-  <summary>How to use it (30 seconds)</summary>
-  <ol>
-    <li><strong>Type or paste your URL</strong> — the full address starting with <code>https://</code></li>
-    <li><strong>Pick a style</strong> — Designer for a stylish dotted QR with a logo, Plain for a classic black-and-white QR, or Halftone for a QR rendered from a photograph</li>
-    <li><strong>Choose colours</strong> — or pick a preset</li>
-    <li><strong>Upload a logo or photo</strong> if your chosen style uses one</li>
-    <li><strong>Click Generate</strong>, then tap the <strong>Download</strong> button to save your QR code</li>
-  </ol>
-  <p><strong>Important:</strong> always scan your finished QR with a real phone (or two) before printing it on anything important. Decorative styles are scannable but slightly less robust than plain QRs.</p>
-</details>
+      <details>
+        <summary>How to use it (30 seconds)</summary>
+        <ol>
+          <li><strong>Select a type</strong> — link, Wi-Fi, contact, text, or email</li>
+          <li><strong>Fill in your details</strong></li>
+          <li><strong>Pick a style</strong> — Designer for a stylish dotted QR with a logo, Plain for a classic square QR, or Halftone for a photograph QR</li>
+          <li><strong>Choose colours</strong> and upload a logo/photo if needed</li>
+          <li><strong>Click Generate</strong>, then tap the <strong>Download</strong> button</li>
+        </ol>
+        <p><strong>Important:</strong> always scan your finished QR with a real phone (or two) before printing it. Decorative styles are scannable but slightly less robust than plain QRs.</p>
+      </details>
+    </div>
 
-<form id="qr-form" method="post" enctype="multipart/form-data"
-      aria-label="QR code generator">
-  <input type="hidden" name="generate" value="1">
+    <form id="qr-form" class="glass-panel" method="post" enctype="multipart/form-data" aria-label="QR code generator" novalidate>
+      <input type="hidden" name="generate" value="1">
+      <input type="hidden" name="content_type" id="content_type" value="url">
 
-  <label for="url">
-    Website URL
-    <input type="url" id="url" name="url" required
-           placeholder="https://example.com"
-           value="https://"
-           aria-describedby="url-hint">
-    <span id="url-hint" class="hint">The full address. Must start with <code>http://</code> or <code>https://</code>.</span>
-  </label>
+      <!-- Tabs for Content Type -->
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-target="pane-url">🔗 Link</button>
+        <button type="button" class="tab-btn" role="tab" aria-selected="false" data-target="pane-wifi">📶 Wi-Fi</button>
+        <button type="button" class="tab-btn" role="tab" aria-selected="false" data-target="pane-vcard">👤 Contact</button>
+        <button type="button" class="tab-btn" role="tab" aria-selected="false" data-target="pane-text">📝 Text</button>
+        <button type="button" class="tab-btn" role="tab" aria-selected="false" data-target="pane-email">✉️ Email</button>
+      </div>
+
+      <!-- Tab Panes -->
+      <div id="pane-url" class="tab-pane active" role="tabpanel">
+        <label for="url">
+          Website URL
+          <input type="url" id="url" name="url" placeholder="https://example.com" aria-describedby="url-hint">
+          <span id="url-hint" class="hint">The full address. Must start with <code>http://</code> or <code>https://</code>.</span>
+        </label>
+      </div>
+
+      <div id="pane-wifi" class="tab-pane" role="tabpanel">
+        <div class="row">
+          <label for="wifi-ssid">Network Name (SSID) <input type="text" id="wifi-ssid" name="wifi_ssid" placeholder="MyNetwork"></label>
+          <label for="wifi-pass">Password <input type="text" id="wifi-pass" name="wifi_pass" placeholder="Secret123"></label>
+        </div>
+        <label for="wifi-enc">
+          Encryption
+          <select id="wifi-enc" name="wifi_enc">
+            <option value="WPA">WPA/WPA2 (Most common)</option>
+            <option value="WEP">WEP</option>
+            <option value="nopass">None (Open network)</option>
+          </select>
+        </label>
+        <label class="checkbox-row" for="wifi-hidden">
+          <input type="checkbox" name="wifi_hidden" id="wifi-hidden" value="1">
+          Hidden network
+        </label>
+      </div>
+
+      <div id="pane-vcard" class="tab-pane" role="tabpanel">
+        <div class="row">
+          <label for="vc-fname">First Name <input type="text" id="vc-fname" name="vc_fname"></label>
+          <label for="vc-lname">Last Name <input type="text" id="vc-lname" name="vc_lname"></label>
+        </div>
+        <div class="row">
+          <label for="vc-org">Company <input type="text" id="vc-org" name="vc_org"></label>
+          <label for="vc-title">Job Title <input type="text" id="vc-title" name="vc_title"></label>
+        </div>
+        <div class="row">
+          <label for="vc-tel">Phone <input type="tel" id="vc-tel" name="vc_tel"></label>
+          <label for="vc-email">Email <input type="email" id="vc-email" name="vc_email"></label>
+        </div>
+        <label for="vc-url">Website <input type="url" id="vc-url" name="vc_url" placeholder="https://"></label>
+      </div>
+
+      <div id="pane-text" class="tab-pane" role="tabpanel">
+        <label for="text-content">
+          Message or Serial Number
+          <textarea id="text-content" name="text_content" placeholder="Enter any text here..."></textarea>
+        </label>
+      </div>
+
+      <div id="pane-email" class="tab-pane" role="tabpanel">
+        <label for="email-to">Send To <input type="email" id="email-to" name="email_to" placeholder="hello@example.com"></label>
+        <label for="email-sub">Subject <input type="text" id="email-sub" name="email_sub"></label>
+        <label for="email-body">Body <textarea id="email-body" name="email_body"></textarea></label>
+      </div>
+      
+      <hr style="border:0; border-top:1px solid var(--border); margin: .5rem 0;">
 
   <label for="mode">
     Style
@@ -748,7 +930,7 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
 
     <label for="photo-designer">
       Centre logo (optional)
-      <input type="file" name="photo" id="photo-designer" accept="image/png,image/jpeg,image/webp">
+      <input type="file" name="photo_designer" id="photo-designer" accept="image/png,image/jpeg,image/webp">
       <span class="hint">A simple icon or silhouette works best. Square aspect, light background.</span>
     </label>
   </fieldset>
@@ -757,7 +939,7 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     <legend>Halftone QR — photograph</legend>
     <label for="photo-halftone">
       Photograph (required)
-      <input type="file" name="photo" id="photo-halftone" accept="image/png,image/jpeg,image/webp">
+      <input type="file" name="photo_halftone" id="photo-halftone" accept="image/png,image/jpeg,image/webp">
       <span class="hint">High-contrast portraits work best. Square photos. The subject becomes a textured pattern made from QR data.</span>
     </label>
   </fieldset>
@@ -773,27 +955,38 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     <span class="hint">Bigger = sharper when printed. 1200px is great for most uses; bump to 2000+ for large posters.</span>
   </label>
 
-  <div>
-    <button type="submit" class="go" id="generate-btn">
-      <span id="btn-label">Generate QR code →</span>
-    </button>
-  </div>
-</form>
+    <div>
+      <button type="submit" class="go" id="generate-btn">
+        <span id="btn-label">Generate QR code →</span>
+      </button>
+    </div>
+  </form>
+</div>
 
-<div class="preview hidden" id="preview" aria-live="polite">
-  <div class="preview-status" id="preview-status">
-    <span class="checkmark">✓</span> Your QR code is ready
-  </div>
-  <img id="qr-img" alt="Generated QR code" style="display:none">
-  <div id="preview-error" class="preview-error hidden"></div>
-  <div class="preview-actions" id="preview-actions" style="display:none">
-    <a id="download-btn" class="btn-download" download="qrcode.png" href="#">⬇ Download PNG</a>
-    <button type="button" id="share-btn" class="btn-share" style="display:none">↗ Share</button>
-  </div>
-  <div class="download-hint">
-    <strong>Before printing anything important:</strong> test-scan with at least 2 different phones.
+<div class="right-col">
+  <div class="preview-wrapper">
+    <div class="preview glass-panel" id="preview" aria-live="polite">
+      
+      <div id="preview-placeholder" class="preview-placeholder">
+        <div style="font-size:3rem;margin-bottom:.5rem;opacity:0.5">🪄</div>
+        Fill out the form and click Generate to see your QR code here.
+      </div>
+
+      <div class="preview-status hidden" id="preview-status"></div>
+      <img id="qr-img" alt="Generated QR code" style="display:none">
+      <div id="preview-error" class="preview-error hidden"></div>
+      <div class="preview-actions" id="preview-actions" style="display:none">
+        <a id="download-btn" class="btn-download" download="qrcode.png" href="#">⬇ Download</a>
+        <button type="button" id="share-btn" class="btn-share" style="display:none">↗ Share</button>
+      </div>
+      <div class="download-hint hidden" id="dl-hint">
+        <strong>Before printing:</strong> Always test-scan with at least 2 different phones to ensure reliability.
+      </div>
+    </div>
   </div>
 </div>
+
+</div> <!-- main-wrapper end -->
 
 <footer>
   <?= APP_NAME ?> is free, open-source, and ad-free. Built with care.<br>
@@ -803,6 +996,33 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
 </div>
 
 <script>
+// --- Tabs Logic ---
+const tabBtns = document.querySelectorAll('.tab-btn');
+const tabPanes = document.querySelectorAll('.tab-pane');
+const typeInput = document.getElementById('content_type');
+const urlInput = document.getElementById('url'); // Need to toggle required attribute
+
+tabBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    // Remove active from all
+    tabBtns.forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); });
+    tabPanes.forEach(p => p.classList.remove('active'));
+    
+    // Add active to clicked
+    btn.classList.add('active');
+    btn.setAttribute('aria-selected', 'true');
+    const targetPaneId = btn.getAttribute('data-target');
+    document.getElementById(targetPaneId).classList.add('active');
+    
+    // Update hidden input
+    typeInput.value = targetPaneId.replace('pane-', '');
+    
+    // Manage required attribute (only require URL if URL tab is active, we'll validate server-side mostly)
+    if (typeInput.value === 'url') urlInput.setAttribute('required', 'required');
+    else urlInput.removeAttribute('required');
+  });
+});
+
 // --- Colour picker binding ---
 function bindPair(p, h) {
   const picker = document.getElementById(p), hex = document.getElementById(h);
@@ -855,19 +1075,27 @@ document.getElementById('qr-form').addEventListener('submit', async function(e) 
   const dlBtn     = document.getElementById('download-btn');
   const shareBtn  = document.getElementById('share-btn');
 
+  const placeholder = document.getElementById('preview-placeholder');
+  const dlHint    = document.getElementById('dl-hint');
+
   // Disable button + show spinner
   btn.disabled = true;
   btnLabel.innerHTML = '<span class="spinner"></span> Generating…';
 
   // Reset preview state
+  placeholder.classList.add('hidden');
   img.style.display = 'none';
   actions.style.display = 'none';
+  dlHint.classList.add('hidden');
   errorEl.classList.add('hidden');
-  status.innerHTML = '<span class="spinner" style="border-color:var(--border);border-top-color:var(--pink)"></span> Generating your QR code…';
-  preview.classList.remove('hidden');
+  
+  status.innerHTML = '<span class="spinner" style="border-color:var(--border);border-top-color:var(--pink)"></span> Generating...';
+  status.classList.remove('hidden');
 
-  // Smooth scroll to preview
-  setTimeout(() => preview.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+  // Smooth scroll to preview on mobile
+  if (window.innerWidth <= 850) {
+    setTimeout(() => document.querySelector('.right-col').scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+  }
 
   // Revoke previous blob
   if (currentBlobUrl) {
@@ -901,7 +1129,8 @@ document.getElementById('qr-form').addEventListener('submit', async function(e) 
     img.style.display = 'block';
 
     // Update status
-    status.innerHTML = '<span class="checkmark">✓</span> Your QR code is ready';
+    status.innerHTML = '<span class="checkmark">✓</span> Ready';
+    dlHint.classList.remove('hidden');
 
     // Wire up download button
     dlBtn.href = currentBlobUrl;
