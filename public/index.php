@@ -139,6 +139,7 @@ function render_designer_qr(
     int    $finalSize,
     bool   $transparent,
     string $centerShape,   // 'circle' | 'square' | 'none'
+    int    $centerBorder,  // 0-10
     int    $centerSizePct, // 0-25
     ?array $fg2 = null     // [r,g,b] for gradient end
 ): string {
@@ -207,22 +208,32 @@ function render_designer_qr(
     }
 
     // 3. Centre shape
+    $centerBorderPx = 0;
     if ($centerShape !== 'none' && $centerSizePct > 0) {
         $cx = (int)($outSize / 2);
         $cy = (int)($outSize / 2);
         $punchR = (int)($outSize * $centerSizePct / 100);
+        $centerBorderPx = (int)($centerBorder * ($modulePx / 2));
         $centerFill = $transparent ? $whiteSolid : imagecolorallocate($img, $bg[0], $bg[1], $bg[2]);
 
         if ($centerShape === 'circle') {
-            imagefilledellipse($img, $cx, $cy, $punchR * 2, $punchR * 2, $centerFill);
-            $ringW = max(4, (int)($modulePx / 6));
-            imagesetthickness($img, $ringW);
-            imageellipse($img, $cx, $cy, $punchR * 2, $punchR * 2, $fgColor);
-            imagesetthickness($img, 1);
+            if ($centerBorderPx > 0) {
+                imagefilledellipse($img, $cx, $cy, $punchR * 2, $punchR * 2, $fgColor);
+                $innerD = ($punchR * 2) - ($centerBorderPx * 2);
+                imagefilledellipse($img, $cx, $cy, $innerD, $innerD, $centerFill);
+            } else {
+                imagefilledellipse($img, $cx, $cy, $punchR * 2, $punchR * 2, $centerFill);
+            }
         } elseif ($centerShape === 'square') {
-            $r = $modulePx * 2;
-            draw_rounded_rect($img, $cx - $punchR, $cy - $punchR, $punchR * 2, $punchR * 2, $r, $centerFill);
-            // (no ring for square — looks cleaner)
+            $r = max(1, $modulePx * 2);
+            if ($centerBorderPx > 0) {
+                draw_rounded_rect($img, $cx - $punchR, $cy - $punchR, $punchR * 2, $punchR * 2, $r, $fgColor);
+                $innerW = ($punchR * 2) - ($centerBorderPx * 2);
+                draw_rounded_rect($img, $cx - $punchR + $centerBorderPx, $cy - $punchR + $centerBorderPx, 
+                                  $innerW, $innerW, max(1, $r - $centerBorderPx), $centerFill);
+            } else {
+                draw_rounded_rect($img, $cx - $punchR, $cy - $punchR, $punchR * 2, $punchR * 2, $r, $centerFill);
+            }
         }
     }
 
@@ -245,12 +256,9 @@ function render_designer_qr(
                 }
             }
 
-            // Size: if there's a centre shape, fit inside it; if not, use a sensible default
-            if ($centerShape !== 'none' && $centerSizePct > 0) {
-                $logoSize = (int)($outSize * $centerSizePct / 100 * 1.4);
-            } else {
-                $logoSize = (int)($outSize * 0.15);
-            }
+            // Size: fit inside the center area
+            $logoSize = (int)(($outSize * $centerSizePct / 100 * 2) - ($centerBorderPx * 2)) - (int)($modulePx * 0.5);
+            if ($centerShape === 'none') $logoSize = (int)($outSize * 0.15);
 
             $resized = imagecreatetruecolor($logoSize, $logoSize);
             imagealphablending($resized, false);
@@ -259,6 +267,29 @@ function render_designer_qr(
             imagefilledrectangle($resized, 0, 0, $logoSize, $logoSize, $tr);
             imagealphablending($resized, true);
             imagecopyresampled($resized, $logo, 0, 0, 0, 0, $logoSize, $logoSize, $lw, $lh);
+
+            // Masking
+            if ($centerShape === 'circle') {
+                $maskR = $logoSize / 2;
+                for ($x = 0; $x < $logoSize; $x++) {
+                    for ($y = 0; $y < $logoSize; $y++) {
+                        if ((($x - $maskR + 0.5)**2 + ($y - $maskR + 0.5)**2) > ($maskR**2)) {
+                            imagesetpixel($resized, $x, $y, $tr);
+                        }
+                    }
+                }
+            } elseif ($centerShape === 'square') {
+                $r = (int)($logoSize * 0.2);
+                for ($x = 0; $x < $logoSize; $x++) {
+                    for ($y = 0; $y < $logoSize; $y++) {
+                        $isCorner = ($x < $r && $y < $r) || ($x > $logoSize - $r && $y < $r) || ($x < $r && $y > $logoSize - $r) || ($x > $logoSize - $r && $y > $logoSize - $r);
+                        if ($isCorner) {
+                            $dist = sqrt((($x - ($x < $r ? $r : $logoSize - $r))**2) + (($y - ($y < $r ? $r : $logoSize - $r))**2));
+                            if ($dist > $r) imagesetpixel($resized, $x, $y, $tr);
+                        }
+                    }
+                }
+            }
 
             $cx = (int)($outSize / 2);
             $cy = (int)($outSize / 2);
@@ -435,6 +466,8 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
     $transparent  = !empty($_POST['transparent']);
     $centerShape  = $_POST['centershape'] ?? 'circle';
     if (!in_array($centerShape, ['circle', 'square', 'none'])) $centerShape = 'circle';
+    $centerBorder = (int)($_POST['centerborder'] ?? 4);
+    $centerBorder = max(0, min($centerBorder, 10));
     $centerSize   = (int)($_POST['centersize'] ?? 14);
     $centerSize   = max(0, min($centerSize, 25));
     $format       = $_POST['format'] ?? $_GET['format'] ?? 'png';
@@ -462,7 +495,12 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
             $logoPath = $_FILES['photo_designer']['tmp_name'];
         }
         try {
-            $png = render_designer_qr($url, $logoPath, [$fR,$fG,$fB], [$bR,$bG,$bB], $size, $transparent, $centerShape, $centerSize, $fg2Arr);
+            $halftonePath = (!empty($_FILES['photo_halftone']['name'])) ? $_FILES['photo_halftone']['tmp_name'] : null;
+            if ($mode === 'halftone' && $halftonePath) {
+                $png = render_halftone_qr($url, $halftonePath, $size);
+            } else {
+                $png = render_designer_qr($url, $logoPath, [$fR,$fG,$fB], [$bR,$bG,$bB], $size, $transparent, $centerShape, $centerBorder, $centerSize, $fg2Arr);
+            }
             header('Content-Type: image/png');
             header('Content-Disposition: inline; filename="qrcode.png"');
             echo $png; exit;
@@ -811,7 +849,7 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
 
     <form id="qr-form" class="glass-panel" method="post" enctype="multipart/form-data" novalidate>
       <input type="hidden" name="generate" value="1">
-      <input type="hidden" name="content_type" id="content_type" value="url">
+      <input type="hidden" name="content_type" id="content_type" value="url" autocomplete="off">
 
       <div class="tabs" role="tablist">
         <button type="button" class="tab-btn active" data-target="pane-url">🔗 Link</button>
@@ -920,8 +958,12 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
         <legend>Designer</legend>
 
         <label for="centershape">Centre shape
-          <select name="centershape" id="centershape" onchange="document.getElementById('centersize-label').style.display = this.value === 'none' ? 'none' : 'grid'">
-            <option value="circle" selected>Circle (with ring)</option>
+          <select name="centershape" id="centershape" onchange="
+            var hide = this.value === 'none';
+            document.getElementById('centersize-label').style.display = hide ? 'none' : 'grid';
+            document.getElementById('centerborder-label').style.display = hide ? 'none' : 'grid';
+          ">
+            <option value="circle" selected>Circle</option>
             <option value="square">Rounded square</option>
             <option value="none">None — logo only, no shape</option>
           </select>
@@ -931,6 +973,12 @@ if (isset($_POST['generate']) || isset($_GET['generate'])) {
           Centre size: <span id="centersize-value">14</span>%
           <input type="range" name="centersize" id="centersize" min="8" max="22" value="14"
                  oninput="document.getElementById('centersize-value').textContent = this.value">
+        </label>
+
+        <label for="centerborder" id="centerborder-label">
+          Border width: <span id="centerborder-value">4</span>
+          <input type="range" name="centerborder" id="centerborder" min="0" max="10" value="4"
+                 oninput="document.getElementById('centerborder-value').textContent = this.value">
         </label>
 
         <label for="photo-designer" style="margin-top:0.5rem">Logo <input type="file" name="photo_designer" id="photo-designer"></label>
@@ -1160,9 +1208,16 @@ async function generateQR() {
     }
 
   } catch (err) {
-    status.innerHTML = '<span style="color:#e74c3c;font-size:1.3rem">✗ </span> Generation failed';
-    errorEl.textContent = err.message;
-    errorEl.classList.remove('hidden');
+    if (err.message.startsWith('Please provide')) {
+      status.classList.add('hidden');
+      img.style.display = 'none';
+      placeholder.innerHTML = `<div style="font-size:3rem;margin-bottom:.5rem;opacity:0.5">🪄</div>${err.message}`;
+      placeholder.classList.remove('hidden');
+    } else {
+      status.innerHTML = '<span style="color:#e74c3c;font-size:1.3rem">✗ </span> Generation failed';
+      errorEl.textContent = err.message;
+      errorEl.classList.remove('hidden');
+    }
   } finally {
     btn.disabled = false;
     btnLabel.textContent = 'Generate QR code →';
@@ -1184,6 +1239,9 @@ form.addEventListener('submit', function(e) {
     setTimeout(() => document.querySelector('.right-col').scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   }
 });
+
+// Sync type on load in case of browser bfcache/reload
+typeInput.value = document.querySelector('.tab-btn.active').getAttribute('data-target').replace('pane-', '');
 
 // Attach Live Preview events
 form.querySelectorAll('input[type="text"], input[type="url"], input[type="email"], input[type="number"], textarea').forEach(el => {
